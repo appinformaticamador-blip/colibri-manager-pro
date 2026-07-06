@@ -33,3 +33,13 @@ Vercel desplegará automáticamente.
 - Empleados
 - Horas y nóminas base
 - Inventario, compras e IA preparados para próximas versiones
+
+
+## v3 - GPS y QR del bar
+
+- Coordenadas configuradas para Avenida Carlos V, Local 3, Sevilla: `37.3804817, -5.9864303`.
+- Radio inicial: `75` metros.
+- Si el GPS falla o marca fuera, el empleado puede escanear el QR físico del bar: `public/qr_bar_colibri.png`.
+- El QR abre `https://fichar.braseria-elcolibri.es/?qr=COLIBRI-LOCAL-CV3-2026` y el fichaje queda anotado como validado por QR.
+
+Sube el contenido completo a GitHub y Vercel desplegará automáticamente.
