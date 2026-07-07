@@ -1,24 +1,47 @@
-# Colibrí Sync Clean v1.2
+# Colibrí Sync 2.0
 
-Corrección del mapeo real NUMIER:
+Sincronizador NUMIER → Supabase para Brasería El Colibrí.
 
-- cabecera.DBF: `CAB_ID`, `CAB_FECHA`, `CAB_HORA`, `CAB_ESTADO`, `CAB_COBRO`, `CAB_NUMDOC`, `CAB_ENT_TA`, `CAB_ENT_CH`
-- detalle.DBF: `DET_ID`, `DET_IMPORT`
+## Configuración incluida
+
+No hay que editar `config.json`. La configuración va integrada:
+
+- Ruta NUMIER: `C:\NUMIER\DATOS`
+- Cabecera: `cabecera.DBF`
+- Detalle: `detalle.DBF`
+- Supabase: proyecto de Brasería El Colibrí
+- Auto-sync: 60 segundos
+- Límite por sincronización: 500 tickets
 
 ## Instalación
 
-1. Ejecuta en Supabase `sql/colibri_numier_clean_v12.sql`.
-2. Sube `sync/`, `sql/`, `.github/` y este README a GitHub.
+1. Ejecutar en Supabase `sql/colibri_numier_sync_v2.sql`.
+2. Subir al repositorio:
+   - `sync/`
+   - `sql/`
+   - `.github/`
+   - `README.md`
 3. Commit + Push.
-4. GitHub Actions → `Build Colibri Sync Clean EXE`.
-5. Descarga artifact `ColibriSync-Clean-Windows-v1-2`.
-6. Edita `config.json` y pega tu anon key.
-7. Ejecuta `ColibriSync.exe`.
+4. GitHub → Actions → `Build Colibri Sync 2.0 EXE`.
+5. Descargar artifact `ColibriSync-2-0-Windows`.
+6. En el PC del bar, ejecutar `ColibriSync.exe`.
 
-## Depuración
+## Uso
 
-En PowerShell:
+- Pulsa `S` para sincronizar manualmente.
+- Pulsa `Q` para salir.
+- También sincroniza solo cada 60 segundos.
 
-```powershell
-.\ColibriSync.exe --debug
-```
+## Mapeo NUMIER
+
+- `cabecera.CAB_ID` → ID ticket
+- `cabecera.CAB_FECHA` → fecha
+- `cabecera.CAB_HORA` → hora
+- `cabecera.CAB_ESTADO` → estado (`C` cobrado)
+- `cabecera.CAB_COBRO` → forma de cobro
+- `cabecera.CAB_NUMDOC` → número documento
+- `cabecera.CAB_ENT_TA` → tarjeta
+- `cabecera.CAB_ENT_CH` → cheque
+- `detalle.DET_ID` → relación con `CAB_ID`
+- `detalle.DET_IMPORT` → importe línea
+- `detalle.DET_TIPO_I` → IVA

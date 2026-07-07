@@ -1,0 +1,26 @@
+name: Build Colibri Sync 2.0 EXE
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'sync/**'
+      - '.github/workflows/build-colibri-sync-v2.yml'
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Publish single EXE
+        run: dotnet publish sync/ColibriSync/ColibriSync.csproj -c Release -r win-x64 --self-contained true /p:PublishSingleFile=true /p:IncludeNativeLibrariesForSelfExtract=true /p:EnableCompressionInSingleFile=true -o publish
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ColibriSync-2-0-Windows
+          path: publish/**
