@@ -1,32 +1,48 @@
-# Colibrí ERP v1.2 - Cierre manual de turnos
+# Colibrí ERP v2.2 - Live Business
 
-ERP Cloud para Brasería El Colibrí.
+Versión con ventas NUMIER LIVE y sincronizador seguro para usar NUMIER abierto.
 
-## Instalación rápida
+## Incluye
 
-1. Ejecutar `supabase/colibri_erp_clean_v1.sql` en Supabase SQL Editor.
-2. Subir este proyecto a GitHub.
-3. Vercel despliega automáticamente.
-4. Variables necesarias en Vercel:
-   - `VITE_SUPABASE_URL`
-   - `VITE_SUPABASE_ANON_KEY`
+- Dashboard ventas NUMIER.
+- Selector de fecha: hoy, ayer y fecha concreta.
+- Ventas, tickets, ticket medio, efectivo, tarjeta y cheque.
+- Ventas por hora y últimos tickets.
+- Estado de última sincronización.
+- Colibrí Sync 2.2 con copia temporal segura de `cabecera.DBF` y `detalle.DBF`.
+- Reintentos si NUMIER tiene los DBF ocupados.
+- Auto-sync cada 60 segundos.
 
-Accesos:
-- Manager: `manager.braseria-elcolibri.es`
-- Fichaje: `fichar.braseria-elcolibri.es`
+## Actualizar web
 
-Clave manager temporal: `131313`.
+1. Sustituir en GitHub los archivos/carpetas del proyecto web:
+   - `src/`
+   - `public/`
+   - `index.html`
+   - `package.json`
+   - `README.md`
+2. Commit + Push.
+3. Vercel desplegará automáticamente.
 
-## Novedad v1.2
+## Actualizar sincronizador
 
-- En **Manager → Fichajes** aparece una sección **Fichajes abiertos**.
-- Permite cerrar manualmente el turno de un empleado si olvidó fichar salida.
-- El cierre queda registrado como `SALIDA MANUAL POR MANAGER` con motivo y hora real.
+1. Sustituir en GitHub:
+   - `sync/`
+   - `sql/`
+   - `.github/`
+2. Commit + Push.
+3. GitHub → Actions → ejecutar `Build Colibri Sync 2.2 EXE`.
+4. Descargar artifact `ColibriSync-2-2-Windows`.
+5. En el PC del bar, sustituir el EXE anterior por el nuevo.
 
-## Actualización
+## Supabase
 
-1. Ejecuta en Supabase el archivo:
-   `supabase/colibri_erp_v12_cierre_manager.sql`
-2. Sube el contenido del proyecto a GitHub.
-3. Commit + Push.
-4. Vercel desplegará automáticamente.
+Si ya ejecutaste el SQL de NUMIER v2 y te está sincronizando tickets reales, no hace falta repetir SQL.
+
+Si partes de cero, ejecuta:
+
+`sql/colibri_numier_sync_v2.sql`
+
+## Importante
+
+Colibrí Sync 2.2 ya no lee directamente los DBF bloqueados. Primero crea una copia temporal segura y lee esa copia. Esto permite trabajar con NUMIER abierto.

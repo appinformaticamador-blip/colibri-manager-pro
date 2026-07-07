@@ -51,7 +51,7 @@ public sealed class ColibriSyncApp
 
     private void Header()
     {
-        Console.WriteLine("🐦 Colibrí Sync 2.0 - NUMIER → Supabase");
+        Console.WriteLine("🐦 Colibrí Sync 2.2 - NUMIER LIVE seguro → Supabase");
         Console.WriteLine("------------------------------------------------");
         Console.WriteLine($"Empresa: {_config.BusinessName}");
         Console.WriteLine($"Ruta NUMIER: {_config.NumierPath}");
@@ -77,8 +77,9 @@ public sealed class ColibriSyncApp
         var lastCabId = await api.GetLastCabIdAsync();
         Log($"Último CAB_ID en Supabase: {lastCabId}");
 
-        var cabDbf = DbfTable.Open(cabPath);
-        var detDbf = DbfTable.Open(detPath);
+        using var snapshot = SafeDbfSnapshot.Create(cabPath, detPath, Log);
+        var cabDbf = DbfTable.Open(snapshot.CabeceraPath);
+        var detDbf = DbfTable.Open(snapshot.DetallePath);
 
         if (debug)
         {
@@ -181,6 +182,60 @@ public sealed class ColibriSyncApp
 
     private static string FirstNonEmpty(params string[] values) => values.FirstOrDefault(v => !string.IsNullOrWhiteSpace(v)) ?? "";
     private static void Log(string msg) => Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] {msg}");
+}
+
+
+public sealed class SafeDbfSnapshot : IDisposable
+{
+    public string CabeceraPath { get; }
+    public string DetallePath { get; }
+    private readonly string _dir;
+
+    private SafeDbfSnapshot(string dir, string cabeceraPath, string detallePath)
+    {
+        _dir = dir;
+        CabeceraPath = cabeceraPath;
+        DetallePath = detallePath;
+    }
+
+    public static SafeDbfSnapshot Create(string cabeceraSource, string detalleSource, Action<string> log)
+    {
+        string baseDir = Path.Combine(Path.GetTempPath(), "ColibriSync", "snapshots", DateTime.Now.ToString("yyyyMMdd_HHmmss_fff"));
+        Directory.CreateDirectory(baseDir);
+        string cabDest = Path.Combine(baseDir, Path.GetFileName(cabeceraSource));
+        string detDest = Path.Combine(baseDir, Path.GetFileName(detalleSource));
+        CopyWithRetries(cabeceraSource, cabDest, log);
+        CopyWithRetries(detalleSource, detDest, log);
+        log("Copia temporal segura creada. NUMIER puede seguir abierto.");
+        return new SafeDbfSnapshot(baseDir, cabDest, detDest);
+    }
+
+    private static void CopyWithRetries(string source, string dest, Action<string> log)
+    {
+        Exception? last = null;
+        for (int attempt = 1; attempt <= 8; attempt++)
+        {
+            try
+            {
+                using var input = new FileStream(source, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, bufferSize: 1024 * 1024);
+                using var output = new FileStream(dest, FileMode.Create, FileAccess.Write, FileShare.None, bufferSize: 1024 * 1024);
+                input.CopyTo(output);
+                return;
+            }
+            catch (Exception ex)
+            {
+                last = ex;
+                log($"NUMIER ocupado o archivo bloqueado. Reintento {attempt}/8: {Path.GetFileName(source)}");
+                Thread.Sleep(1500);
+            }
+        }
+        throw new IOException($"No se pudo copiar {source}. Último error: {last?.Message}", last);
+    }
+
+    public void Dispose()
+    {
+        try { if (Directory.Exists(_dir)) Directory.Delete(_dir, recursive: true); } catch { }
+    }
 }
 
 public sealed record SyncConfig
@@ -287,7 +342,7 @@ public sealed class DbfTable
     public static DbfTable Open(string path)
     {
         var t = new DbfTable(path);
-        using var fs = File.OpenRead(path);
+        using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
         Span<byte> header = stackalloc byte[32];
         fs.ReadExactly(header);
         t.RecordCount = BitConverter.ToInt32(header.Slice(4, 4));
@@ -310,7 +365,7 @@ public sealed class DbfTable
     }
     public IEnumerable<DbfRecord> Records()
     {
-        using var fs = File.OpenRead(Path);
+        using var fs = new FileStream(Path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
         fs.Position = HeaderLength;
         var buffer = new byte[RecordLength];
         for (int i = 0; i < RecordCount; i++)

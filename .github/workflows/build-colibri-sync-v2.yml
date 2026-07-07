@@ -1,4 +1,4 @@
-name: Build Colibri Sync 2.0 EXE
+name: Build Colibri Sync 2.2 EXE
 
 on:
   workflow_dispatch:
@@ -22,5 +22,5 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ColibriSync-2-0-Windows
+          name: ColibriSync-2-2-Windows
           path: publish/**
