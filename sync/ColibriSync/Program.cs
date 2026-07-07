@@ -3,6 +3,7 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 
+Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
 Console.OutputEncoding = Encoding.UTF8;
 Console.WriteLine("🐦 Colibrí Sync 1.0 limpio - NUMIER → Supabase");
 Console.WriteLine("------------------------------------------------");
