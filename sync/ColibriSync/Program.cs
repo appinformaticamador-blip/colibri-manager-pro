@@ -1,306 +1,297 @@
 using System.Globalization;
 using System.Net.Http.Headers;
-using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using System.Windows.Forms;
 
-namespace ColibriSync;
+Console.OutputEncoding = Encoding.UTF8;
+Console.WriteLine("🐦 Colibrí Sync 1.0 limpio - NUMIER → Supabase");
+Console.WriteLine("------------------------------------------------");
 
-internal static class Program
+var configPath = Path.Combine(AppContext.BaseDirectory, "config.json");
+if (!File.Exists(configPath))
 {
-    [STAThread]
-    static void Main()
-    {
-        ApplicationConfiguration.Initialize();
-        Application.Run(new MainForm());
-    }
+    var example = Path.Combine(AppContext.BaseDirectory, "config.example.json");
+    if (File.Exists(example)) File.Copy(example, configPath);
+    Console.WriteLine("Se ha creado config.json. Edítalo con tu anon key y vuelve a abrir el programa.");
+    Console.ReadKey();
+    return;
 }
 
-public class SyncConfig
+var config = AppConfig.Load(configPath);
+var sync = new NumierSync(config);
+
+Console.WriteLine($"Ruta NUMIER: {config.NumierPath}");
+Console.WriteLine($"Archivos: {config.CabeceraFile} / {config.DetalleFile}");
+Console.WriteLine($"Auto-sync: cada {config.AutoSyncSeconds}s");
+Console.WriteLine("Pulsa S para sincronizar ahora, Q para salir.\n");
+
+await sync.SyncOnceAsync();
+
+var cts = new CancellationTokenSource();
+_ = Task.Run(async () =>
 {
-    public string numier_path { get; set; } = @"C:\NUMIER\DATOS";
-    public string cabecera_file { get; set; } = "cabecera.DBF";
-    public string detalle_file { get; set; } = "detalle.DBF";
-    public string supabase_url { get; set; } = "";
-    public string supabase_anon_key { get; set; } = "";
-    public int auto_sync_seconds { get; set; } = 60;
-    public int initial_import_days { get; set; } = 7;
-    public int max_tickets_per_sync { get; set; } = 2000;
-}
-
-public class MainForm : Form
-{
-    private readonly TextBox log = new() { Multiline = true, Dock = DockStyle.Fill, ScrollBars = ScrollBars.Vertical, ReadOnly = true };
-    private readonly Button syncButton = new() { Text = "Sincronizar ahora", Dock = DockStyle.Top, Height = 34 };
-    private readonly Button configButton = new() { Text = "Abrir config.json", Dock = DockStyle.Top, Height = 34 };
-    private readonly string configPath = Path.Combine(AppContext.BaseDirectory, "config.json");
-    private SyncConfig config = new();
-    private System.Windows.Forms.Timer timer = new();
-    private bool syncing = false;
-
-    public MainForm()
-    {
-        Text = "Colibrí Sync 3.0 · NUMIER Import";
-        Width = 860; Height = 560;
-        Controls.Add(log); Controls.Add(configButton); Controls.Add(syncButton);
-        syncButton.Click += async (_, _) => await SyncNow(false);
-        configButton.Click += (_, _) => OpenConfig();
-        LoadConfig();
-        timer.Interval = Math.Max(30, config.auto_sync_seconds) * 1000;
-        timer.Tick += async (_, _) => await SyncNow(true);
-        timer.Start();
-        Log("Listo. Ruta NUMIER: " + config.numier_path);
-        Log("Archivos: " + config.cabecera_file + " / " + config.detalle_file);
-        Log($"Auto-sync: activo cada {Math.Max(30, config.auto_sync_seconds)}s");
-    }
-
-    private void LoadConfig()
+    while (!cts.Token.IsCancellationRequested)
     {
         try
         {
-            if (!File.Exists(configPath))
-            {
-                var example = Path.Combine(AppContext.BaseDirectory, "config.example.json");
-                if (File.Exists(example)) File.Copy(example, configPath);
-                else File.WriteAllText(configPath, JsonSerializer.Serialize(config, new JsonSerializerOptions { WriteIndented = true }));
-            }
-            config = JsonSerializer.Deserialize<SyncConfig>(File.ReadAllText(configPath)) ?? new SyncConfig();
+            await Task.Delay(TimeSpan.FromSeconds(config.AutoSyncSeconds), cts.Token);
+            await sync.SyncOnceAsync();
         }
-        catch (Exception ex) { Log("Error cargando config: " + ex.Message); }
+        catch (TaskCanceledException) { }
+        catch (Exception ex) { Log($"Error auto-sync: {ex.Message}"); }
+    }
+});
+
+while (true)
+{
+    var key = Console.ReadKey(true).Key;
+    if (key == ConsoleKey.Q) { cts.Cancel(); break; }
+    if (key == ConsoleKey.S) await sync.SyncOnceAsync();
+}
+
+static void Log(string msg) => Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] {msg}");
+
+public sealed class AppConfig
+{
+    public string NumierPath { get; set; } = @"C:\NUMIER\DATOS";
+    public string CabeceraFile { get; set; } = "cabecera.DBF";
+    public string DetalleFile { get; set; } = "detalle.DBF";
+    public string SupabaseUrl { get; set; } = "";
+    public string SupabaseAnonKey { get; set; } = "";
+    public int AutoSyncSeconds { get; set; } = 60;
+    public int MaxTicketsPerSync { get; set; } = 500;
+    public string BusinessName { get; set; } = "Brasería El Colibrí";
+
+    public static AppConfig Load(string path)
+    {
+        var json = File.ReadAllText(path);
+        var doc = JsonDocument.Parse(json).RootElement;
+        return new AppConfig
+        {
+            NumierPath = doc.GetPropertyOrDefault("numier_path", @"C:\NUMIER\DATOS"),
+            CabeceraFile = doc.GetPropertyOrDefault("cabecera_file", "cabecera.DBF"),
+            DetalleFile = doc.GetPropertyOrDefault("detalle_file", "detalle.DBF"),
+            SupabaseUrl = doc.GetPropertyOrDefault("supabase_url", ""),
+            SupabaseAnonKey = doc.GetPropertyOrDefault("supabase_anon_key", ""),
+            AutoSyncSeconds = doc.GetPropertyOrDefault("auto_sync_seconds", 60),
+            MaxTicketsPerSync = doc.GetPropertyOrDefault("max_tickets_per_sync", 500),
+            BusinessName = doc.GetPropertyOrDefault("business_name", "Brasería El Colibrí")
+        };
+    }
+}
+
+public static class JsonExt
+{
+    public static string GetPropertyOrDefault(this JsonElement e, string name, string def) => e.TryGetProperty(name, out var p) ? p.GetString() ?? def : def;
+    public static int GetPropertyOrDefault(this JsonElement e, string name, int def) => e.TryGetProperty(name, out var p) && p.TryGetInt32(out var v) ? v : def;
+}
+
+public sealed class NumierSync
+{
+    private readonly AppConfig _cfg;
+    private readonly HttpClient _http = new();
+
+    public NumierSync(AppConfig cfg)
+    {
+        _cfg = cfg;
+        _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", cfg.SupabaseAnonKey);
+        _http.DefaultRequestHeaders.Add("apikey", cfg.SupabaseAnonKey);
+        _http.DefaultRequestHeaders.Add("Prefer", "resolution=merge-duplicates,return=minimal");
     }
 
-    private void OpenConfig()
+    public async Task SyncOnceAsync()
     {
-        LoadConfig();
-        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(configPath) { UseShellExecute = true });
-    }
-
-    private async Task SyncNow(bool auto)
-    {
-        if (syncing) return;
-        syncing = true;
         try
         {
-            LoadConfig();
-            var cabPath = Path.Combine(config.numier_path, config.cabecera_file);
-            var detPath = Path.Combine(config.numier_path, config.detalle_file);
-            if (!Directory.Exists(config.numier_path)) { Log("ERROR: No existe la ruta NUMIER."); return; }
-            if (!File.Exists(cabPath)) { Log("No encontrado: " + config.cabecera_file); return; }
-            if (!File.Exists(detPath)) { Log("No encontrado: " + config.detalle_file); return; }
-            if (!HasSupabase()) { Log("Supabase no configurado. Edita config.json."); return; }
+            Log("Comprobando NUMIER...");
+            var cabPath = Path.Combine(_cfg.NumierPath, _cfg.CabeceraFile);
+            var detPath = Path.Combine(_cfg.NumierPath, _cfg.DetalleFile);
+            if (!File.Exists(cabPath)) { Log($"No encuentro cabecera: {cabPath}"); return; }
+            if (!File.Exists(detPath)) { Log($"No encuentro detalle: {detPath}"); return; }
 
-            var cabInfo = new FileInfo(cabPath); var detInfo = new FileInfo(detPath);
-            if (!auto) Log($"OK cabecera: {cabInfo.Length:N0} bytes · detalle: {detInfo.Length:N0} bytes");
+            await RegisterFileAsync(cabPath);
+            await RegisterFileAsync(detPath);
 
-            using var http = NewHttp();
-            await RegisterFiles(http, cabInfo, detInfo);
-            var lastCabId = await GetLastCabId(http);
-            var headers = Dbf.Read(cabPath);
-            var headerRows = headers.Rows
-                .Select(r => MapHeader(r))
-                .Where(t => t.CabId > 0 && t.Estado == "C")
-                .Where(t => lastCabId > 0 ? t.CabId > lastCabId : t.Fecha >= DateTime.Today.AddDays(-Math.Max(1, config.initial_import_days)))
-                .OrderBy(t => t.CabId)
-                .Take(Math.Max(100, config.max_tickets_per_sync))
+            var cab = DbfTable.Read(cabPath);
+            var det = DbfTable.Read(detPath, maxRows: 0); // por ahora solo esquema del detalle; líneas en v1.1
+            await UpsertSchemaAsync("cabecera", cab.Fields);
+            await UpsertSchemaAsync("detalle", det.Fields);
+
+            var idField = Pick(cab.Fields, "CAB_ID", "ID", "CABID");
+            if (idField is null) { Log("No encuentro campo CAB_ID/ID en cabecera. Esquema enviado a Supabase."); return; }
+
+            var lastId = await GetLastCabIdAsync();
+            var newRows = cab.Rows
+                .Where(r => ToLong(r.GetValueOrDefault(idField)) > lastId)
+                .OrderBy(r => ToLong(r.GetValueOrDefault(idField)))
+                .Take(_cfg.MaxTicketsPerSync)
                 .ToList();
 
-            if (headerRows.Count == 0) { Log(auto ? "Auto-sync: sin tickets nuevos." : "Sin tickets nuevos."); return; }
-            Log($"Tickets a importar: {headerRows.Count} (desde CAB_ID {headerRows.First().CabId} hasta {headerRows.Last().CabId})");
+            Log($"Último CAB_ID en Supabase: {lastId}. Nuevos detectados: {newRows.Count}");
+            if (newRows.Count == 0) { Log("Sin tickets nuevos."); return; }
 
-            var ids = headerRows.Select(t => t.CabId).ToHashSet();
-            var detailRows = new List<LineRow>();
-            foreach (var r in Dbf.ReadRows(detPath))
-            {
-                var line = MapLine(r);
-                if (ids.Contains(line.CabId)) detailRows.Add(line);
-            }
-
-            var sums = detailRows.GroupBy(l => l.CabId).ToDictionary(g => g.Key, g => Math.Round(g.Sum(x => x.Importe), 2));
-            foreach (var t in headerRows)
-            {
-                t.Total = sums.TryGetValue(t.CabId, out var total) ? total : 0m;
-                if (t.FormaPago == "T") t.Tarjeta = t.Total;
-                else if (t.FormaPago == "E") t.Efectivo = t.Total;
-                else if (t.FormaPago == "A") { t.Tarjeta = Math.Min(t.Total, t.TarjetaDeclarada); t.Cheque = t.ChequeDeclarado; t.Efectivo = Math.Max(0, t.Total - t.Tarjeta - t.Cheque); }
-                else t.Efectivo = t.Total;
-            }
-
-            await UpsertTickets(http, headerRows);
-            await UpsertLines(http, detailRows);
-            foreach (var f in headerRows.Select(h => h.Fecha.Date).Distinct()) await RefreshDaily(http, f);
-            Log($"Importación OK: {headerRows.Count} tickets · {detailRows.Count} líneas.");
+            var payload = newRows.Select(r => MapTicket(r, idField)).ToList();
+            await PostJsonAsync("numier_tickets?on_conflict=cab_id", payload);
+            await RebuildDailySalesAsync();
+            Log($"Tickets enviados: {payload.Count}");
         }
-        catch (Exception ex) { Log("ERROR: " + ex.Message); }
-        finally { syncing = false; }
-    }
-
-    private bool HasSupabase() => !string.IsNullOrWhiteSpace(config.supabase_url) && !string.IsNullOrWhiteSpace(config.supabase_anon_key) && !config.supabase_anon_key.Contains("PEGA_AQUI");
-    private HttpClient NewHttp()
-    {
-        var h = new HttpClient();
-        h.DefaultRequestHeaders.Add("apikey", config.supabase_anon_key);
-        h.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", config.supabase_anon_key);
-        return h;
-    }
-    private string Rest(string path) => config.supabase_url.TrimEnd('/') + "/rest/v1/" + path;
-
-    private async Task RegisterFiles(HttpClient http, FileInfo cab, FileInfo det)
-    {
-        var payload = new[] {
-            new { source="numier", file_name=config.cabecera_file, file_size=cab.Length, modified_at=cab.LastWriteTimeUtc.ToString("O"), synced_at=DateTime.UtcNow.ToString("O") },
-            new { source="numier", file_name=config.detalle_file, file_size=det.Length, modified_at=det.LastWriteTimeUtc.ToString("O"), synced_at=DateTime.UtcNow.ToString("O") }
-        };
-        await PostJson(http, Rest("numier_sync_files"), payload, false);
-    }
-
-    private async Task<long> GetLastCabId(HttpClient http)
-    {
-        var res = await http.GetAsync(Rest("numier_tickets?select=cab_id&order=cab_id.desc&limit=1"));
-        if (!res.IsSuccessStatusCode) return 0;
-        var txt = await res.Content.ReadAsStringAsync();
-        using var doc = JsonDocument.Parse(txt);
-        if (doc.RootElement.GetArrayLength() == 0) return 0;
-        return doc.RootElement[0].GetProperty("cab_id").GetInt64();
-    }
-
-    private async Task UpsertTickets(HttpClient http, List<TicketRow> tickets)
-    {
-        var payload = tickets.Select(t => new {
-            cab_id=t.CabId, numdoc=t.Numdoc, fecha=t.Fecha.ToString("yyyy-MM-dd"), hora=t.Hora?.ToUniversalTime().ToString("O"),
-            estado=t.Estado, forma_pago=t.FormaPago, total=t.Total, efectivo=t.Efectivo, tarjeta=t.Tarjeta, cheque=t.Cheque,
-            mesa=t.Mesa, comensales=t.Comensales,
-            raw=new { cab_ent_ta=t.TarjetaDeclarada, cab_ent_ch=t.ChequeDeclarado }
-        }).ToList();
-        await PostJson(http, Rest("numier_tickets?on_conflict=cab_id"), payload, true);
-    }
-
-    private async Task UpsertLines(HttpClient http, List<LineRow> lines)
-    {
-        const int chunk = 1000;
-        for (int i = 0; i < lines.Count; i += chunk)
+        catch (Exception ex)
         {
-            var payload = lines.Skip(i).Take(chunk).Select(l => new {
-                cab_id=l.CabId, line_hash=l.LineHash, articulo=l.Articulo, cantidad=l.Cantidad, importe=l.Importe,
-                precio=l.Precio, iva=l.Iva, descripcion=l.Descripcion
-            }).ToList();
-            await PostJson(http, Rest("numier_ticket_lines?on_conflict=cab_id,line_hash"), payload, true);
+            Log($"ERROR: {ex.Message}");
         }
     }
 
-    private async Task RefreshDaily(HttpClient http, DateTime fecha)
+    private Dictionary<string, object?> MapTicket(Dictionary<string, string?> r, string idField)
     {
-        var payload = new { p_fecha = fecha.ToString("yyyy-MM-dd") };
-        await PostJson(http, config.supabase_url.TrimEnd('/') + "/rest/v1/rpc/refresh_numier_daily_sales", payload, false);
-    }
+        var fechaRaw = First(r, "CAB_FECHA", "FECHA", "FEC", "CAB_FEC");
+        var horaRaw = First(r, "CAB_HORA", "HORA", "FECHAHORA", "CAB_FH");
+        var totalRaw = First(r, "CAB_TOTAL", "TOTAL", "IMPORTE", "TOTALIVA", "CAB_TOT");
+        var fpRaw = First(r, "CAB_PAGO", "FPAGO", "FORMA_PAGO", "PAGO", "CAB_FP");
+        var estadoRaw = First(r, "CAB_ESTADO", "ESTADO", "SITUACION");
+        var numdocRaw = First(r, "NUMDOC", "DOCUMENTO", "TICKET", "SERIE");
 
-    private async Task PostJson(HttpClient http, string url, object payload, bool upsert)
-    {
-        using var req = new HttpRequestMessage(HttpMethod.Post, url);
-        req.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
-        if (upsert) req.Headers.Add("Prefer", "resolution=merge-duplicates,return=minimal");
-        else req.Headers.Add("Prefer", "return=minimal");
-        var res = await http.SendAsync(req);
-        var body = await res.Content.ReadAsStringAsync();
-        if (!res.IsSuccessStatusCode) throw new Exception($"Supabase {res.StatusCode}: {body}");
-    }
+        var cabId = ToLong(r.GetValueOrDefault(idField));
+        var total = ToDecimal(totalRaw);
+        var fp = (fpRaw ?? "").Trim().ToUpperInvariant();
+        decimal efectivo = 0, tarjeta = 0, cheque = 0;
+        if (fp == "E") efectivo = total;
+        else if (fp == "T") tarjeta = total;
+        else if (fp == "C" || fp == "CH") cheque = total;
 
-    private TicketRow MapHeader(Dictionary<string, object?> r)
-    {
-        var fecha = ParseDate(r.Get("CAB_FECHA"));
-        var hora = ParseTimestamp(r.Get("CAB_HORA"));
-        return new TicketRow {
-            CabId = Convert.ToInt64(r.Get("CAB_ID") ?? 0),
-            Fecha = fecha,
-            Hora = hora ?? fecha,
-            Estado = (r.Get("CAB_ESTADO")?.ToString() ?? "").Trim(),
-            FormaPago = (r.Get("CAB_COBRO")?.ToString() ?? "").Trim(),
-            Numdoc = (r.Get("CAB_NUMDOC")?.ToString() ?? "").Trim(),
-            TarjetaDeclarada = ToDec(r.Get("CAB_ENT_TA")), ChequeDeclarado = ToDec(r.Get("CAB_ENT_CH")),
-            Mesa = ToDec(r.Get("CAB_MESA")), Comensales = ToDec(r.Get("CAB_COMENS"))
+        var fecha = ParseDate(fechaRaw, horaRaw);
+        return new Dictionary<string, object?>
+        {
+            ["cab_id"] = cabId,
+            ["fecha"] = fecha?.ToString("yyyy-MM-dd"),
+            ["hora"] = fecha?.ToString("o"),
+            ["estado"] = estadoRaw,
+            ["forma_pago"] = fpRaw,
+            ["numdoc"] = numdocRaw,
+            ["total"] = total,
+            ["efectivo"] = efectivo,
+            ["tarjeta"] = tarjeta,
+            ["cheque"] = cheque,
+            ["raw_json"] = r
         };
     }
-    private LineRow MapLine(Dictionary<string, object?> r)
+
+    private async Task RegisterFileAsync(string path)
     {
-        var cabId = Convert.ToInt64(ToDec(r.Get("DET_ID")));
-        var art = (r.Get("DET_ARTICU")?.ToString() ?? "").Trim();
-        var cant = ToDec(r.Get("DET_CANTID")); var imp = ToDec(r.Get("DET_IMPORT")); var precio = ToDec(r.Get("DET_PRECIO")); var iva = ToDec(r.Get("DET_TIPO_I"));
-        var desc = (r.Get("DET_CAD_PR")?.ToString() ?? "").Trim();
-        var raw = $"{cabId}|{art}|{cant}|{imp}|{precio}|{desc}|{r.Get("DET_ORDEN")}";
-        return new LineRow { CabId=cabId, Articulo=art, Cantidad=cant, Importe=imp, Precio=precio, Iva=iva, Descripcion=desc, LineHash=Hash(raw) };
+        var fi = new FileInfo(path);
+        var payload = new [] { new Dictionary<string, object?> {
+            ["source"] = "numier",
+            ["file_name"] = fi.Name,
+            ["file_size"] = fi.Length,
+            ["modified_at"] = fi.LastWriteTimeUtc.ToString("o"),
+            ["synced_at"] = DateTime.UtcNow.ToString("o")
+        }};
+        await PostJsonAsync("numier_sync_files?on_conflict=source,file_name", payload);
     }
-    private static decimal ToDec(object? v) => v == null ? 0m : Convert.ToDecimal(v, CultureInfo.InvariantCulture);
-    private static DateTime ParseDate(object? v)
+
+    private async Task UpsertSchemaAsync(string table, List<DbfField> fields)
     {
-        var s = (v?.ToString() ?? "").Trim();
-        return DateTime.TryParseExact(s, "yyyyMMdd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var d) ? d : DateTime.Today;
+        var payload = fields.Select(f => new Dictionary<string, object?> {
+            ["source"] = "numier",
+            ["dbf_table"] = table,
+            ["field_name"] = f.Name,
+            ["field_type"] = f.Type.ToString(),
+            ["field_length"] = f.Length,
+            ["field_decimal"] = f.DecimalCount
+        }).ToList();
+        await PostJsonAsync("numier_dbf_schema?on_conflict=source,dbf_table,field_name", payload);
     }
-    private static DateTime? ParseTimestamp(object? v)
+
+    private async Task<long> GetLastCabIdAsync()
     {
-        if (v is DbfTimestamp ts) return ts.ToDateTime();
+        var url = $"{_cfg.SupabaseUrl.TrimEnd('/')}/rest/v1/numier_tickets?select=cab_id&order=cab_id.desc&limit=1";
+        var res = await _http.GetAsync(url);
+        var txt = await res.Content.ReadAsStringAsync();
+        if (!res.IsSuccessStatusCode) throw new Exception($"Supabase GET last cab_id: {txt}");
+        var arr = JsonDocument.Parse(txt).RootElement;
+        if (arr.GetArrayLength() == 0) return 0;
+        return arr[0].GetProperty("cab_id").GetInt64();
+    }
+
+    private async Task RebuildDailySalesAsync()
+    {
+        var rpc = $"{_cfg.SupabaseUrl.TrimEnd('/')}/rest/v1/rpc/rebuild_numier_daily_sales";
+        var res = await _http.PostAsync(rpc, new StringContent("{}", Encoding.UTF8, "application/json"));
+        var txt = await res.Content.ReadAsStringAsync();
+        if (!res.IsSuccessStatusCode) Log($"Aviso: no se pudo recalcular ventas diarias: {txt}");
+    }
+
+    private async Task PostJsonAsync(string endpoint, object payload)
+    {
+        var url = $"{_cfg.SupabaseUrl.TrimEnd('/')}/rest/v1/{endpoint}";
+        var json = JsonSerializer.Serialize(payload);
+        var res = await _http.PostAsync(url, new StringContent(json, Encoding.UTF8, "application/json"));
+        var txt = await res.Content.ReadAsStringAsync();
+        if (!res.IsSuccessStatusCode) throw new Exception($"Supabase POST {endpoint}: {txt}");
+    }
+
+    static string? Pick(List<DbfField> fields, params string[] names) => names.FirstOrDefault(n => fields.Any(f => f.Name.Equals(n, StringComparison.OrdinalIgnoreCase)));
+    static string? First(Dictionary<string,string?> r, params string[] names) => names.Select(n => r.FirstOrDefault(kv => kv.Key.Equals(n, StringComparison.OrdinalIgnoreCase)).Value).FirstOrDefault(v => !string.IsNullOrWhiteSpace(v));
+    static long ToLong(string? s) => long.TryParse((s ?? "").Trim(), NumberStyles.Any, CultureInfo.InvariantCulture, out var v) ? v : 0;
+    static decimal ToDecimal(string? s) { var x=(s??"").Trim().Replace(",", "."); return decimal.TryParse(x, NumberStyles.Any, CultureInfo.InvariantCulture, out var v) ? v : 0; }
+    static DateTime? ParseDate(string? fecha, string? hora)
+    {
+        var s = ((fecha ?? "") + " " + (hora ?? "")).Trim();
+        string[] formats = {"yyyy-MM-dd HH:mm:ss", "dd/MM/yyyy HH:mm:ss", "yyyyMMdd HHmmss", "yyyyMMdd", "dd/MM/yyyy", "yyyy-MM-dd"};
+        if (DateTime.TryParseExact(s, formats, CultureInfo.InvariantCulture, DateTimeStyles.AssumeLocal, out var dt)) return dt;
+        if (DateTime.TryParse(s, out dt)) return dt;
         return null;
     }
-    private static string Hash(string s) => Convert.ToHexString(SHA1.HashData(Encoding.UTF8.GetBytes(s))).ToLowerInvariant();
-    private void Log(string msg) => log.AppendText($"[{DateTime.Now:HH:mm:ss}] {msg}{Environment.NewLine}");
+    static void Log(string msg) => Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] {msg}");
 }
 
-public record TicketRow { public long CabId; public DateTime Fecha; public DateTime? Hora; public string Estado=""; public string FormaPago=""; public string Numdoc=""; public decimal Total; public decimal Efectivo; public decimal Tarjeta; public decimal Cheque; public decimal TarjetaDeclarada; public decimal ChequeDeclarado; public decimal Mesa; public decimal Comensales; }
-public record LineRow { public long CabId; public string LineHash=""; public string Articulo=""; public decimal Cantidad; public decimal Importe; public decimal Precio; public decimal Iva; public string Descripcion=""; }
-
-public record DbfTimestamp(int JulianDay, int Milliseconds)
+public record DbfField(string Name, char Type, int Length, int DecimalCount);
+public sealed class DbfTable
 {
-    public DateTime ToDateTime()
-    {
-        var l = JulianDay + 68569; var n = 4 * l / 146097; l = l - (146097 * n + 3) / 4;
-        var i = 4000 * (l + 1) / 1461001; l = l - 1461 * i / 4 + 31;
-        var j = 80 * l / 2447; var day = l - 2447 * j / 80; l = j / 11;
-        var month = j + 2 - 12 * l; var year = 100 * (n - 49) + i + l;
-        return new DateTime(year, month, day).AddMilliseconds(Milliseconds);
-    }
-}
+    public List<DbfField> Fields { get; } = new();
+    public List<Dictionary<string, string?>> Rows { get; } = new();
 
-public static class DictExt { public static object? Get(this Dictionary<string, object?> d, string k) => d.TryGetValue(k, out var v) ? v : null; }
-
-public class Dbf
-{
-    public List<Dictionary<string, object?>> Rows { get; set; } = new();
-    public static Dbf Read(string path) => new() { Rows = ReadRows(path).ToList() };
-    public static IEnumerable<Dictionary<string, object?>> ReadRows(string path)
+    public static DbfTable Read(string path, int? maxRows = null)
     {
-        using var fs = File.Open(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-        using var br = new BinaryReader(fs, Encoding.GetEncoding("ISO-8859-1"));
-        fs.Seek(4, SeekOrigin.Begin); var count = br.ReadInt32(); var headerLen = br.ReadUInt16(); var recLen = br.ReadUInt16();
-        fs.Seek(32, SeekOrigin.Begin);
-        var fields = new List<Field>(); int offset = 1;
-        while (true)
+        using var fs = File.OpenRead(path);
+        using var br = new BinaryReader(fs, Encoding.GetEncoding(1252));
+        br.ReadByte(); br.ReadBytes(3);
+        var rowCount = br.ReadInt32();
+        var headerLen = br.ReadInt16();
+        var recordLen = br.ReadInt16();
+        br.ReadBytes(20);
+
+        var t = new DbfTable();
+        while (fs.Position < headerLen - 1)
         {
-            var desc = br.ReadBytes(32); if (desc.Length < 32 || desc[0] == 0x0D) break;
-            var name = Encoding.GetEncoding("ISO-8859-1").GetString(desc,0,11).Split('\0')[0].Trim();
-            var type = (char)desc[11]; var len = desc[16]; var dec = desc[17]; fields.Add(new Field(name,type,len,dec,offset)); offset += len;
+            var first = br.ReadByte();
+            if (first == 0x0D) break;
+            var nameBytes = new byte[11]; nameBytes[0] = first; br.Read(nameBytes, 1, 10);
+            var name = Encoding.ASCII.GetString(nameBytes).TrimEnd('\0', ' ');
+            var type = (char)br.ReadByte();
+            br.ReadBytes(4);
+            var len = br.ReadByte();
+            var dec = br.ReadByte();
+            br.ReadBytes(14);
+            if (!string.IsNullOrWhiteSpace(name)) t.Fields.Add(new DbfField(name, type, len, dec));
         }
-        fs.Seek(headerLen, SeekOrigin.Begin);
-        for (int i=0; i<count; i++)
+        fs.Position = headerLen;
+        var rowsToRead = maxRows.HasValue ? Math.Min(rowCount, maxRows.Value) : rowCount;
+        var enc = Encoding.GetEncoding(1252);
+        for (int i = 0; i < rowsToRead; i++)
         {
-            var rec = br.ReadBytes(recLen); if (rec.Length < recLen) yield break; if (rec[0] == (byte)'*') continue;
-            var row = new Dictionary<string, object?>();
-            foreach (var f in fields)
+            var rec = br.ReadBytes(recordLen);
+            if (rec.Length < recordLen) break;
+            if (rec[0] == 0x2A) continue;
+            int offset = 1;
+            var row = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+            foreach (var f in t.Fields)
             {
-                var raw = rec.Skip(f.Offset).Take(f.Length).ToArray();
-                row[f.Name] = Parse(raw, f.Type, f.Decimals);
+                var raw = enc.GetString(rec, offset, f.Length).Trim();
+                row[f.Name] = raw.Length == 0 ? null : raw;
+                offset += f.Length;
             }
-            yield return row;
+            t.Rows.Add(row);
         }
+        return t;
     }
-    private static object? Parse(byte[] raw, char type, int dec)
-    {
-        var enc = Encoding.GetEncoding("ISO-8859-1");
-        if (type == 'C' || type == 'M') return enc.GetString(raw).Trim();
-        if (type == 'D') return enc.GetString(raw).Trim();
-        if (type == 'N' || type == 'F') { var s = enc.GetString(raw).Trim().Replace(',', '.'); return decimal.TryParse(s, NumberStyles.Any, CultureInfo.InvariantCulture, out var d) ? d : null; }
-        if (type == 'I' && raw.Length >= 4) return BitConverter.ToInt32(raw,0);
-        if (type == 'L') return raw.Length > 0 && (raw[0] == 'T' || raw[0] == 't' || raw[0] == 'Y' || raw[0] == 'y');
-        if (type == 'T' && raw.Length >= 8) return new DbfTimestamp(BitConverter.ToInt32(raw,0), BitConverter.ToInt32(raw,4));
-        return enc.GetString(raw).Trim();
-    }
-    record Field(string Name, char Type, int Length, int Decimals, int Offset);
 }

@@ -5,6 +5,6 @@
   "supabase_url": "https://xccyaoziutlxxklcofrw.supabase.co",
   "supabase_anon_key": "PEGA_AQUI_TU_ANON_KEY",
   "auto_sync_seconds": 60,
-  "initial_import_days": 7,
-  "max_tickets_per_sync": 2000
+  "max_tickets_per_sync": 500,
+  "business_name": "Brasería El Colibrí"
 }
