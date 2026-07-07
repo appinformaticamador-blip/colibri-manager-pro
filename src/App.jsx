@@ -133,64 +133,198 @@ function BusinessIntelligence(){const[mode,setMode]=useState('hoy');const[date,s
 function DailyReport({summary,lines,tickets,clockRows,period}){const topQty=productRank(lines,'qty')[0];const topMoney=productRank(lines,'total')[0];const totalStaffHours=(clockRows||[]).filter(r=>String(r.type).toLowerCase()==='entrada').length;return <div className="card report"><h2>🧾 Informe diario / periodo</h2><div className="reportGrid"><p><span>Ventas</span><b>{money(summary.total)}</b></p><p><span>Tickets</span><b>{summary.tickets}</b></p><p><span>Ticket medio</span><b>{money(summary.ticket_medio)}</b></p><p><span>Producto más vendido</span><b>{topQty?topQty.name:'-'}</b></p><p><span>Mayor facturación</span><b>{topMoney?topMoney.name:'-'}</b></p><p><span>Coste hora</span><b>7 €/h</b></p></div><button onClick={()=>navigator.clipboard.writeText(`INFORME COLIBRÍ ERP\n${period.label}\nVentas: ${money(summary.total)}\nTickets: ${summary.tickets}\nTicket medio: ${money(summary.ticket_medio)}\nEfectivo: ${money(summary.efectivo)}\nTarjeta: ${money(summary.tarjeta)}\nProducto más vendido: ${topQty?topQty.name:'-'}\nMayor facturación: ${topMoney?topMoney.name:'-'}`)}>Copiar informe</button><p className="mutedText">El informe automático de las 00:00 queda preparado a nivel de datos; de momento también puedes generarlo y copiarlo desde aquí.</p></div>}
 
 
+
+const DAILY_TARGET=4000;
+function pct(n,d){return d?((Number(n||0)/Number(d||1))*100):0}
+function dayName(dateStr){return new Date(dateStr+'T12:00:00').toLocaleDateString('es-ES',{weekday:'long'})}
+function timeOnly(iso){return iso?new Date(iso).toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'}):'-'}
+function latestByEmployee(rows){
+ const latest=new Map();
+ (rows||[]).forEach(r=>{const k=r.employee_id||r.employee_name;if(!latest.has(k))latest.set(k,r)});
+ return latest;
+}
+function expectedEndProjection(total,date){
+ if(date!==today()) return total;
+ const now=new Date();
+ const current=now.getHours()+now.getMinutes()/60;
+ const open=8, close=23.5;
+ const progress=Math.max(.08,Math.min(1,(current-open)/(close-open)));
+ return Math.max(total,total/progress);
+}
+function buildTimeline({tickets=[],clockRows=[],target=DAILY_TARGET}){
+ const ev=[];
+ const firstTicket=tickets[0];
+ const lastTicket=tickets[tickets.length-1];
+ const maxTicket=[...tickets].sort((a,b)=>Number(b.total||0)-Number(a.total||0))[0];
+ const firstClock=[...clockRows].reverse().find(r=>String(r.type).toLowerCase()==='entrada');
+ if(firstClock) ev.push({time:firstClock.created_at,label:`${firstClock.employee_name} ficha entrada`,icon:'👤'});
+ if(firstTicket) ev.push({time:firstTicket.hora,label:`Primer ticket · ${money(firstTicket.total)}`,icon:'🧾'});
+ let acc=0, milestone25=null, milestone50=null, milestone75=null, milestone100=null;
+ tickets.forEach(t=>{
+  acc+=Number(t.total||0);
+  if(!milestone25&&acc>=target*.25) milestone25={time:t.hora,label:'25% del objetivo alcanzado',icon:'🎯'};
+  if(!milestone50&&acc>=target*.50) milestone50={time:t.hora,label:'50% del objetivo alcanzado',icon:'🎯'};
+  if(!milestone75&&acc>=target*.75) milestone75={time:t.hora,label:'75% del objetivo alcanzado',icon:'🎯'};
+  if(!milestone100&&acc>=target) milestone100={time:t.hora,label:'Objetivo diario alcanzado',icon:'🏆'};
+ });
+ [milestone25,milestone50,milestone75,milestone100].filter(Boolean).forEach(e=>ev.push(e));
+ if(maxTicket) ev.push({time:maxTicket.hora,label:`Ticket más alto · ${money(maxTicket.total)}`,icon:'💎'});
+ if(lastTicket) ev.push({time:lastTicket.hora,label:`Último ticket · ${money(lastTicket.total)}`,icon:'🧾'});
+ return ev.filter(e=>e.time).sort((a,b)=>new Date(a.time)-new Date(b.time)).slice(0,12);
+}
+function currentDaySpanish(){
+ const ix=(new Date().getDay()+6)%7;
+ return DAYS[ix];
+}
+function scheduledLateAlerts(clockRows){
+ const alerts=[];
+ let schedule={};
+ try{schedule=JSON.parse(localStorage.colibriSchedule||'{}')}catch(e){schedule={}}
+ const day=currentDaySpanish();
+ const w=week();
+ const now=new Date();
+ const todayStart=today()+'T00:00:00';
+ const entradas=new Set((clockRows||[]).filter(r=>String(r.type).toLowerCase()==='entrada'&&String(r.created_at||'')>=todayStart).map(r=>r.employee_name));
+ for(const slot of SLOTS){
+  const [from]=slot.split('-');
+  const [hh,mm]=from.split(':').map(Number);
+  const startDate=new Date(); startDate.setHours(hh,mm+10,0,0);
+  if(now<startDate) continue;
+  const employees=schedule[`${w}|${day}|${slot}`]||[];
+  employees.forEach(e=>{
+   const name=e.name||e.employee_name;
+   if(name&&!entradas.has(name)) alerts.push({level:'critical',text:`${name} debía entrar a las ${from} y no ha fichado.`});
+  });
+ }
+ return alerts;
+}
+function buildExecutiveMessage({daily,lastWeek,projected,date}){
+ const total=Number(daily?.total||0);
+ const lw=Number(lastWeek?.daily?.total||0);
+ const diff=lw?((total-lw)/lw)*100:null;
+ const objetivo=DAILY_TARGET;
+ const p=pct(total,objetivo);
+ const projectedDiff=pct(projected,objetivo)-100;
+ if(date!==today()){
+  return `Resumen de ${fmtDate(date)}: ventas ${money(total)}, ${daily?.tickets||0} tickets y ticket medio ${money(daily?.ticket_medio)}.`;
+ }
+ if(total===0) return 'Todavía no hay ventas registradas hoy. El sistema está esperando nuevos tickets de NUMIER.';
+ let trend='';
+ if(diff!==null) trend=` Respecto al mismo día de la semana pasada vas ${Math.abs(diff).toFixed(1)}% ${diff>=0?'por encima':'por debajo'}.`;
+ let forecast=` Si el ritmo se mantiene, el cierre estimado es ${money(projected)}, ${projectedDiff>=0?'por encima':'por debajo'} del objetivo diario.`;
+ if(p<50) return `Ahora mismo llevas ${money(total)}, un ${p.toFixed(0)}% del objetivo.${trend}${forecast}`;
+ if(p>=100) return `Objetivo diario alcanzado. Llevas ${money(total)}, un ${p.toFixed(0)}% del objetivo.${trend}`;
+ return `El negocio avanza correctamente: ${money(total)} vendidos, ${daily?.tickets||0} tickets y ${money(daily?.ticket_medio)} de ticket medio.${trend}${forecast}`;
+}
+function ShiftCards({tickets,clockRows}){
+ const shiftStats=SHIFT_DEFS.map(s=>({ ...s, sales:0,tickets:0,staffHours:0,cost:0,score:1 }));
+ tickets.forEach(t=>{const id=shiftForTicket(t); const st=shiftStats.find(x=>x.id===id); if(st){st.sales+=Number(t.total||0);st.tickets++}});
+ const byEmp={}; (clockRows||[]).slice().reverse().forEach(r=>{const k=r.employee_id||r.employee_name;byEmp[k]=byEmp[k]||[];byEmp[k].push(r)});
+ Object.values(byEmp).forEach(list=>{let open=null;list.forEach(r=>{const typ=String(r.type).toLowerCase();if(typ==='entrada')open=r;else if(typ==='salida'&&open){const a=decimalHour(open.created_at),b=decimalHour(r.created_at);if(b>a)shiftStats.forEach(s=>s.staffHours+=overlapHours(a,b,s.start,s.end));open=null;}})});
+ const max=Math.max(1,...shiftStats.map(s=>s.sales));
+ shiftStats.forEach(s=>{s.cost=s.staffHours*EMPLOYEE_HOUR_COST;s.score=Math.max(1,Math.round((s.sales/max)*5));});
+ return <div className="commandShiftGrid">{shiftStats.map(s=><div className="shiftCard" key={s.id}><h3>{s.name}</h3><b>{money(s.sales)}</b><span>{'★'.repeat(s.score)}{'☆'.repeat(5-s.score)}</span><small>{s.tickets} tickets · coste pers. {money(s.cost)}</small></div>)}</div>
+}
+function TopProductCards({lines}){
+ const top=productRank(lines,'qty').slice(0,5);
+ return <div className="topProductCards">{top.length?top.map((p,i)=><div className="productCard" key={p.name}><span>{i===0?'🥇':i===1?'🥈':i===2?'🥉':'#'+(i+1)}</span><b>{p.name}</b><small>{p.qty.toFixed(0)} uds · {money(p.total)}</small></div>):<p>No hay productos cargados todavía.</p>}</div>
+}
+function CommandTimeline({events}){
+ return <div className="timeline">{events.length?events.map((e,i)=><div className="timelineItem" key={i}><span>{timeOnly(e.time)}</span><i>{e.icon}</i><b>{e.label}</b></div>):<p>No hay eventos suficientes para construir la línea temporal.</p>}</div>
+}
+function CommandAlerts({syncStatus,clockRows,daily,projected}){
+ const alerts=[];
+ const st=syncStatus;
+ const lastSync=st?.updated_at?((Date.now()-new Date(st.updated_at).getTime())/60000):null;
+ if(lastSync!==null&&lastSync>15) alerts.push({level:'critical',text:`Colibrí Sync lleva ${Math.round(lastSync)} min sin actualizar.`});
+ scheduledLateAlerts(clockRows).forEach(a=>alerts.push(a));
+ const projectedPct=pct(projected,DAILY_TARGET);
+ if(Number(daily?.total||0)>0&&projectedPct<80) alerts.push({level:'warn',text:`La previsión de cierre está por debajo del 80% del objetivo.`});
+ if(!alerts.length) alerts.push({level:'ok',text:'Todo correcto. No hay alertas importantes.'});
+ return <div className="alertList">{alerts.map((a,i)=><div className={'alert '+a.level} key={i}>{a.level==='critical'?'🔴':a.level==='warn'?'🟡':'🟢'} {a.text}</div>)}</div>
+}
+
 function App(){const host=location.hostname;const onlyClock=host.startsWith('fichar.')||location.pathname.includes('fichar');const [authed,setAuthed]=useState(false);return <>{onlyClock?<ClockPage/>:<>{!authed?<Login onOk={()=>setAuthed(true)}/>:<Manager/>}</>}</>}
 function Login({onOk}){const[pin,setPin]=useState('');return <main className="login"><Brand/><div className="card narrow"><h2>Acceso Manager</h2><input placeholder="Clave gerente" type="password" value={pin} onChange={e=>setPin(e.target.value)}/><button onClick={()=>pin===ADMIN_PIN?onOk():alert('Clave incorrecta')}>Entrar</button><a href="/fichar" className="muted">Ir a fichaje empleados</a></div></main>}
 function Brand(){return <div className="brand"><img src="/logo_colibri.png" onError={e=>e.currentTarget.style.display='none'}/><div><h1>Colibrí ERP</h1><p>Brasería El Colibrí</p></div></div>}
-function Manager(){const[tab,setTab]=useState('dashboard');const tabs=['dashboard','inteligencia','tpv','empleados','fichajes','cuadrantes','comparador','config'];return <div><header><Brand/><nav>{tabs.map(t=><button className={tab===t?'active':''} onClick={()=>setTab(t)} key={t}>{t}</button>)}</nav></header><section className="page">{tab==='dashboard'&&<Dashboard/>}{tab==='inteligencia'&&<BusinessIntelligence/>}{tab==='empleados'&&<Employees/>}{tab==='fichajes'&&<ClockPanel/>}{tab==='cuadrantes'&&<Schedule/>}{tab==='comparador'&&<Compare/>}{tab==='tpv'&&<TPV/>}{tab==='config'&&<Settings/>}</section></div>}
+function Manager(){const[tab,setTab]=useState('dashboard');const tabs=[['dashboard','Centro'],['inteligencia','Inteligencia'],['tpv','TPV'],['empleados','Empleados'],['fichajes','Fichajes'],['cuadrantes','Cuadrantes'],['comparador','Comparador'],['config','Config']];return <div><header><Brand/><nav>{tabs.map(([id,label])=><button className={tab===id?'active':''} onClick={()=>setTab(id)} key={id}>{label}</button>)}</nav></header><section className="page">{tab==='dashboard'&&<Dashboard/>}{tab==='inteligencia'&&<BusinessIntelligence/>}{tab==='empleados'&&<Employees/>}{tab==='fichajes'&&<ClockPanel/>}{tab==='cuadrantes'&&<Schedule/>}{tab==='comparador'&&<Compare/>}{tab==='tpv'&&<TPV/>}{tab==='config'&&<Settings/>}</section></div>}
 
 
-const DAILY_TARGET=4000;
-const OPENING_HOUR=8;
-const CLOSING_HOUR=23.5;
-function pct(v,total){return total?Math.max(0,Math.min(999,(Number(v||0)/Number(total))*100)):0}
-function formatPct(v){const n=Number(v||0);return `${n>=0?'+':''}${n.toFixed(1)}%`}
-function weekdayLabel(dateStr){return new Date(dateStr+'T12:00:00').toLocaleDateString('es-ES',{weekday:'long'})}
-function shiftStatsFromTickets(tickets){return SHIFT_DEFS.map(s=>{const list=(tickets||[]).filter(t=>shiftForTicket(t)===s.id);const sales=list.reduce((a,t)=>a+Number(t.total||0),0);return {...s,sales,tickets:list.length,avg:list.length?sales/list.length:0,rating:Math.min(5,Math.max(1,Math.round((sales/Math.max(1,list.length?list.length*8:1))/4)+2))}})}
-function getTodayScheduleAlerts(rows){
- const alerts=[];let schedule={};try{schedule=JSON.parse(localStorage.colibriSchedule||'{}')}catch(e){}
- const now=new Date();const dayName=DAYS[(now.getDay()+6)%7];const wk=week();const dayStart=today()+'T00:00:00';
- const todaysEntries=(rows||[]).filter(r=>String(r.type).toLowerCase()==='entrada'&&String(r.created_at||'')>=dayStart);
- Object.entries(schedule).forEach(([k,emps])=>{const [kw,d,slot]=k.split('|');if(kw!==wk||d!==dayName)return;const [hh,mm]=slot.split('-')[0].split(':').map(Number);const due=new Date();due.setHours(hh,mm,0,0);if(now-due<10*60000)return;(emps||[]).forEach(emp=>{const found=todaysEntries.find(r=>String(r.employee_name).toLowerCase()===String(emp.name).toLowerCase());if(!found)alerts.push({type:'critical',text:`${emp.name} debía fichar a las ${slot.split('-')[0]} y no consta entrada.`,action:'Revisar/WhatsApp'})})});
- return alerts.slice(0,5);
-}
-function aiExecutiveText({daily,projection,comparePct,alerts}){
- const total=Number(daily?.total||0);const targetPct=pct(total,DAILY_TARGET);const cmp=Number(comparePct||0);
- if(alerts?.some(a=>a.type==='critical'))return `Hay ${alerts.filter(a=>a.type==='critical').length} alerta crítica de personal. Ventas actuales: ${money(total)} (${targetPct.toFixed(0)}% del objetivo).`;
- if(cmp<-15)return `Hoy vas ${Math.abs(cmp).toFixed(1)}% por debajo de la media de días similares. Si el ritmo se mantiene, el cierre previsto está cerca de ${money(projection)}.`;
- if(cmp>10)return `El negocio va ${cmp.toFixed(1)}% por encima de días similares. Ventas actuales: ${money(total)} y previsión de cierre: ${money(projection)}.`;
- return `El negocio evoluciona dentro de lo esperado. Ventas actuales: ${money(total)} (${targetPct.toFixed(0)}% del objetivo) y cierre previsto aproximado: ${money(projection)}.`;
-}
-async function loadSimilarDays(dateStr){
- if(!supabase)return [];
- const dates=[7,14,21,28].map(n=>addDays(dateStr,-n));
- const {data}=await supabase.from('numier_daily_sales').select('*').in('fecha',dates);
- return data||[];
-}
-function makeTimeline({tickets,rows,daily}){
- const items=[];
- const sortedTickets=[...(tickets||[])].sort((a,b)=>new Date(a.hora)-new Date(b.hora));
- const sortedRows=[...(rows||[])].sort((a,b)=>new Date(a.created_at)-new Date(b.created_at));
- sortedRows.slice(0,8).forEach(r=>items.push({time:new Date(r.created_at),icon:String(r.type).toLowerCase()==='entrada'?'👤':'🏁',text:`${r.employee_name} ${String(r.type).toLowerCase()==='entrada'?'ficha entrada':'ficha salida'}`}));
- if(sortedTickets[0])items.push({time:new Date(sortedTickets[0].hora),icon:'🧾',text:`Primer ticket · ${money(sortedTickets[0].total)}`});
- if(sortedTickets.length){const max=sortedTickets.reduce((m,t)=>Number(t.total)>Number(m.total)?t:m,sortedTickets[0]);items.push({time:new Date(max.hora),icon:'💎',text:`Ticket más alto · ${money(max.total)} · ${max.numdoc||max.cab_id}`});}
- let acc=0;let marks=[0.25,0.5,0.75,1];let passed=new Set();
- sortedTickets.forEach(t=>{acc+=Number(t.total||0);marks.forEach(m=>{if(!passed.has(m)&&acc>=DAILY_TARGET*m){passed.add(m);items.push({time:new Date(t.hora),icon:'🎯',text:`${Math.round(m*100)}% del objetivo diario alcanzado`})}})});
- if(sortedTickets.at(-1))items.push({time:new Date(sortedTickets.at(-1).hora),icon:'🔄',text:`Último ticket · ${money(sortedTickets.at(-1).total)}`});
- return items.sort((a,b)=>a.time-b.time).slice(-12);
-}
-function ProductTopCards({lines}){const top=productRank(lines,'qty').slice(0,5);return <div className="card proProducts"><div className="row between"><h2>🍽️ Productos TOP</h2><span className="pill">PRO 3.0</span></div>{top.length===0&&<p>No hay productos para mostrar.</p>}<div className="topProductGrid">{top.map((p,i)=><div className="topProduct" key={p.name}><span>{i===0?'🥇':i===1?'🥈':i===2?'🥉':'#'+(i+1)}</span><b>{p.name}</b><small>{p.qty.toFixed(0)} uds · {money(p.total)}</small></div>)}</div><p className="mutedText">Cuando el Engine sincronice articulos.DBF, aquí aparecerán los nombres comerciales reales y familias.</p></div>}
-function TicketModal({ticket,onClose}){const[lines,setLines]=useState([]);useEffect(()=>{if(!ticket||!supabase)return;supabase.from('numier_ticket_lines').select('*').eq('cab_id',ticket.cab_id).order('id').then(({data})=>setLines(data||[]))},[ticket]);if(!ticket)return null;const text=`BRASERÍA EL COLIBRÍ\nTicket: ${ticket.numdoc||ticket.cab_id}\nFecha: ${new Date(ticket.hora).toLocaleString('es-ES')}\nPago: ${ticket.forma_pago||''}\n-------------------------\n${lines.map(l=>`${l.descripcion||l.articulo} x${Number(l.cantidad||0)} ${money(l.importe)}`).join('\n')}\n-------------------------\nTOTAL: ${money(ticket.total)}`;return <div className="modal"><div className="card ticketView"><button className="close" onClick={onClose}>Cerrar</button><h2>🎫 Ticket PRO</h2><pre>{text}</pre><div className="row"><button onClick={()=>navigator.clipboard.writeText(text)}>Copiar WhatsApp</button><button onClick={()=>window.print()}>Imprimir</button></div></div></div>}
-function LatestTicketsPro({tickets}){const[selected,setSelected]=useState(null);return <div className="card"><div className="row between"><h2>🎫 Últimos tickets</h2><span className="pill">Toca para abrir</span></div><table><thead><tr><th>Hora</th><th>Ticket</th><th>Pago</th><th>Total</th></tr></thead><tbody>{(tickets||[]).slice(-18).reverse().map(t=><tr className="clickable" key={t.id||t.cab_id} onClick={()=>setSelected(t)}><td>{t.hora?new Date(t.hora).toLocaleTimeString('es-ES'):''}</td><td>{t.numdoc||t.cab_id}</td><td>{t.forma_pago||''}</td><td><b>{money(t.total)}</b></td></tr>)}</tbody></table><TicketModal ticket={selected} onClose={()=>setSelected(null)}/></div>}
-function ShiftCards({tickets}){const stats=shiftStatsFromTickets(tickets);const best=[...stats].sort((a,b)=>b.sales-a.sales)[0];return <div className="card"><div className="row between"><h2>⏰ Turnos del negocio</h2>{best&&<span className="pill">Más fuerte: {best.name}</span>}</div><div className="shiftGrid">{stats.map(s=><div className="shiftCard" key={s.id}><b>{s.name}</b><strong>{money(s.sales)}</strong><span>{s.tickets} tickets · {money(s.avg)} medio</span><small>{'⭐'.repeat(Math.max(1,Math.min(5,s.rating)))}</small></div>)}</div></div>}
-function AlertsCenter({alerts,comparePct,syncStatus}){const all=[...(alerts||[])];if(Number(comparePct)<-20)all.push({type:'warning',text:`Ventas ${Math.abs(comparePct).toFixed(1)}% por debajo de días similares.`,action:'Revisar previsión'});if(syncStatus&&Number(syncStatus.progress_percent||0)<100)all.push({type:'warning',text:`NUMIER todavía sincronizando (${Number(syncStatus.progress_percent||0).toFixed(1)}%).`,action:'Esperar actualización'});return <div className="card"><h2>🚨 Qué deberías saber ahora</h2>{all.length===0?<div className="allGood">🟢 Todo correcto. Sin alertas relevantes.</div>:all.map((a,i)=><div className={a.type==='critical'?'alert critical':'alert'} key={i}><b>{a.type==='critical'?'🔴 Crítica':'🟡 Aviso'}</b><p>{a.text}</p><small>{a.action}</small></div>)}</div>}
 function Dashboard(){
- const[rows,setRows]=useState([]);const[sales,setSales]=useState({daily:null,tickets:[],sync:null});const[lines,setLines]=useState([]);const[date,setDate]=useState(today());const[similar,setSimilar]=useState([]);const[syncStatus,setSyncStatus]=useState(null);const[loading,setLoading]=useState(false);
+ const [date,setDate]=useState(today());
+ const [state,setState]=useState({tickets:[],lines:[],clockRows:[],sync:null,syncStatus:null,lastWeek:null,loading:true});
  useEffect(()=>{load();const t=setInterval(load,15000);return()=>clearInterval(t)},[date]);
- async function load(){if(!supabase)return;setLoading(true);const salesData=await loadSalesForDate(date);let fullLines=[];const ids=(salesData.tickets||[]).map(t=>t.cab_id).filter(Boolean);for(let i=0;i<ids.length;i+=200){const {data}=await supabase.from('numier_ticket_lines').select('*').in('cab_id',ids.slice(i,i+200)).limit(10000);if(data)fullLines=fullLines.concat(data)}const [{data:clockData},similarData,st]=await Promise.all([supabase.from('clock_records').select('*').gte('created_at',date+'T00:00:00').lt('created_at',addDays(date,1)+'T00:00:00').order('created_at',{ascending:false}).limit(500),loadSimilarDays(date),loadSyncStatus()]);setRows(clockData||[]);setSales(salesData);setLines(fullLines);setSimilar(similarData);setSyncStatus(st);setLoading(false)}
- const latest=new Map();rows.forEach(r=>{const k=r.employee_id||r.employee_name;if(!latest.has(k))latest.set(k,r)});const working=[...latest.values()].filter(r=>String(r.type).toLowerCase()==='entrada');
- const daily=sales.daily||summarizeTickets(sales.tickets||[]);const avgSimilar=similar.length?similar.reduce((a,d)=>a+Number(d.total||0),0)/similar.length:0;const comparePct=avgSimilar?((Number(daily.total||0)-avgSimilar)/avgSimilar)*100:0;const currentHour=new Date().getHours()+new Date().getMinutes()/60;const dayProgress=Math.max(.05,Math.min(1,(currentHour-OPENING_HOUR)/(CLOSING_HOUR-OPENING_HOUR)));const projection=date===today()?Math.max(Number(daily.total||0),Number(daily.total||0)/dayProgress):Number(daily.total||0);const alerts=getTodayScheduleAlerts(rows);const timeline=makeTimeline({tickets:sales.tickets||[],rows,daily});
- return <div className="commandCenter"><div className="proHero"><div><span className="eyebrow">Colibrí ERP PRO 3.0 · Beta</span><h1>{new Date().getHours()<14?'Buenos días':'Buenas tardes'}, Alfonso</h1><p>{fmtDate(date)} · {loading?'Actualizando datos...':'Centro de mando operativo'}</p></div><div className="liveBadge">🟢 ERP LIVE<br/><small>{syncStatus?secondsAgo(syncStatus.updated_at):'sin estado'}</small></div></div><SyncStatusCard/><div className="proGrid kpiPro"><div className="proCard mainKpi"><span>Ventas</span><b>{money(daily.total)}</b><small>{pct(daily.total,DAILY_TARGET).toFixed(0)}% del objetivo {money(DAILY_TARGET)}</small><div className="miniProgress"><i style={{width:`${pct(daily.total,DAILY_TARGET)}%`}} /></div></div><div className="proCard"><span>Predicción IA</span><b>{money(projection)}</b><small>Cierre previsto</small></div><div className="proCard"><span>Tickets</span><b>{daily.tickets||0}</b><small>{money(daily.ticket_medio)} medio</small></div><div className="proCard"><span>Comparativa</span><b className={comparePct>=0?'ok':'bad'}>{avgSimilar?formatPct(comparePct):'-'}</b><small>media últimos 4 {weekdayLabel(date)}s</small></div><div className="proCard"><span>Personal</span><b>{working.length}</b><small>trabajando ahora</small></div></div><div className="card aiCard"><h2>🧠 Qué deberías saber ahora</h2><p>{aiExecutiveText({daily,projection,comparePct,alerts})}</p></div><AlertsCenter alerts={alerts} comparePct={comparePct} syncStatus={syncStatus}/><div className="grid"><div className="card"><h2>📈 Ventas por hora</h2><SalesByHour tickets={sales.tickets||[]}/></div><div className="card"><h2>👥 Trabajando ahora</h2>{working.length===0?<p>No hay empleados con turno abierto.</p>:working.map(w=><p key={w.id}>🟢 {w.employee_name} · desde {new Date(w.created_at).toLocaleTimeString('es-ES')}</p>)}</div></div><ShiftCards tickets={sales.tickets||[]}/><ProductTopCards lines={lines}/><div className="grid"><div className="card"><h2>📅 Timeline del día</h2><div className="timeline">{timeline.map((it,i)=><div className="timelineItem" key={i}><time>{it.time.toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'})}</time><span>{it.icon}</span><p>{it.text}</p></div>)}</div></div><LatestTicketsPro tickets={sales.tickets||[]}/></div></div>
+ async function load(){
+  if(!supabase)return;
+  const from=date,to=addDays(date,1);
+  const weekAgo=addDays(date,-7);
+  const [{tickets,lines,sync},{data:clockData},syncStatus,lastWeek]=await Promise.all([
+   loadSalesRange(from,to),
+   supabase.from('clock_records').select('*').gte('created_at',from+'T00:00:00').lt('created_at',to+'T00:00:00').order('created_at',{ascending:false}).limit(5000),
+   loadSyncStatus(),
+   loadSalesForDate(weekAgo)
+  ]);
+  setState({tickets,lines,clockRows:clockData||[],sync,syncStatus,lastWeek,loading:false});
+ }
+ const daily=summarizeTickets(state.tickets);
+ const projected=expectedEndProjection(daily.total,date);
+ const objectivePct=Math.min(100,pct(daily.total,DAILY_TARGET));
+ const latest=latestByEmployee(state.clockRows);
+ const working=[...latest.values()].filter(r=>String(r.type).toLowerCase()==='entrada');
+ const executive=buildExecutiveMessage({daily,lastWeek:state.lastWeek,projected,date});
+ const events=buildTimeline({tickets:state.tickets,clockRows:state.clockRows,target:DAILY_TARGET});
+ const weekTotal=Number(state.lastWeek?.daily?.total||0);
+ const weekDiff=weekTotal?((Number(daily.total)-weekTotal)/weekTotal)*100:null;
+ return <div className="commandCenter">
+  <div className="commandHero">
+   <div>
+    <span className="eyebrow">Colibrí ERP PRO 3.0 · Centro de Mando</span>
+    <h2>{date===today()?'Buenos días, Alfonso':'Análisis del día'}</h2>
+    <p>{fmtDate(date)}</p>
+   </div>
+   <div className="row controls">
+    <button onClick={()=>setDate(today())}>Hoy</button>
+    <button onClick={()=>setDate(addDays(today(),-1))}>Ayer</button>
+    <input type="date" value={date} onChange={e=>setDate(e.target.value)}/>
+    <button onClick={load}>{state.loading?'Cargando...':'Actualizar'}</button>
+   </div>
+  </div>
+
+  <SyncStatusCard/>
+
+  <div className="execGrid">
+   <div className="execCard primary"><span>💶 Ventas</span><b>{money(daily.total)}</b><small>{objectivePct.toFixed(0)}% del objetivo de {money(DAILY_TARGET)}</small><div className="miniProgress"><i style={{width:`${objectivePct}%`}}/></div></div>
+   <div className="execCard"><span>🎫 Tickets</span><b>{daily.tickets}</b><small>Ticket medio {money(daily.ticket_medio)}</small></div>
+   <div className="execCard"><span>🔮 Previsión cierre</span><b>{money(projected)}</b><small>{pct(projected,DAILY_TARGET).toFixed(0)}% del objetivo</small></div>
+   <div className="execCard"><span>📈 Semana anterior</span><b>{weekDiff===null?'-':`${weekDiff>=0?'+':''}${weekDiff.toFixed(1)}%`}</b><small>{weekTotal?`vs ${money(weekTotal)}`:'Sin histórico suficiente'}</small></div>
+   <div className="execCard"><span>👥 Trabajando ahora</span><b>{date===today()?working.length:'-'}</b><small>{date===today()?working.map(w=>w.employee_name).join(', ')||'Nadie fichado':'Solo disponible hoy'}</small></div>
+   <div className="execCard"><span>🟢 Estado</span><b>{Number(state.syncStatus?.progress_percent||0)>=100?'LIVE':'SYNC'}</b><small>Última sync {secondsAgo(state.syncStatus?.updated_at||state.sync?.synced_at)}</small></div>
+  </div>
+
+  <div className="card commandAdvice">
+   <h2>🎯 Qué deberías saber ahora</h2>
+   <p>{executive}</p>
+  </div>
+
+  <div className="grid">
+   <div className="card"><h2>📈 Ventas por hora</h2><SalesByHour tickets={state.tickets}/></div>
+   <div className="card"><h2>🚨 Alertas inteligentes</h2><CommandAlerts syncStatus={state.syncStatus} clockRows={state.clockRows} daily={daily} projected={projected}/></div>
+  </div>
+
+  <div className="card"><h2>⏰ Rentabilidad por turnos</h2><ShiftCards tickets={state.tickets} clockRows={state.clockRows}/></div>
+
+  <div className="grid">
+   <div className="card"><h2>🍽️ Productos TOP</h2><TopProductCards lines={state.lines}/></div>
+   <div className="card"><h2>📓 Timeline del día</h2><CommandTimeline events={events}/></div>
+  </div>
+
+  <div className="card">
+   <h2>🎫 Últimos tickets</h2>
+   <table><thead><tr><th>Hora</th><th>Ticket</th><th>Pago</th><th>Total</th></tr></thead><tbody>{state.tickets.slice(-12).reverse().map(t=><tr key={t.id||t.cab_id}><td>{timeOnly(t.hora)}</td><td>{t.numdoc||t.cab_id}</td><td>{t.forma_pago||''}</td><td>{money(t.total)}</td></tr>)}</tbody></table>
+  </div>
+ </div>
 }
+
 function Employees(){const[employees,setEmployees]=useState([]);const[name,setName]=useState('');const[pin,setPin]=useState('');useEffect(()=>{load()},[]);async function load(){if(!supabase)return;const{data}=await supabase.from('employees').select('*').order('name');setEmployees(data||[])}async function add(){if(!name||!pin)return alert('Nombre y PIN');const color=EMP_COLORS[employees.length%EMP_COLORS.length];const{error}=await supabase.from('employees').insert({name,pin,role:'empleado',color,can_clock:true,active:true});if(error)alert(error.message);setName('');setPin('');load()}async function update(e,patch){const{error}=await supabase.from('employees').update(patch).eq('id',e.id);if(error)alert(error.message);load()}return <div className="card"><h2>Empleados</h2><div className="row"><input placeholder="Nuevo empleado" value={name} onChange={e=>setName(e.target.value)}/><input placeholder="PIN" value={pin} onChange={e=>setPin(e.target.value)}/><button onClick={add}>Añadir</button></div>{employees.map(e=><div className="employee" key={e.id}><span className="sq" style={{background:e.color}}></span><b>{e.name}</b><span>{e.active?'Activo':'Inactivo'}</span><input placeholder="Nuevo PIN" onBlur={ev=>ev.target.value&&update(e,{pin:ev.target.value})}/><button onClick={()=>update(e,{active:!e.active})}>{e.active?'Desactivar':'Activar'}</button></div>)}</div>}
 function ClockPage(){const[employees,setEmployees]=useState([]);const[emp,setEmp]=useState('');const[pin,setPin]=useState('');const[note,setNote]=useState('');const[msg,setMsg]=useState('');const[qr,setQr]=useState(false);useEffect(()=>{load()},[]);async function load(){if(!supabase){setMsg('Supabase no configurado');return}const{data}=await supabase.from('employees').select('name').eq('active',true).eq('can_clock',true).order('name');setEmployees(data||[])}async function clock(type,method='gps'){if(!supabase)return setMsg('Supabase no configurado');setMsg('Comprobando...');let coords=null;if(method==='gps'){try{coords=await new Promise((res,rej)=>navigator.geolocation.getCurrentPosition(res,rej,{enableHighAccuracy:true,timeout:15000,maximumAge:0}));}catch(e){setQr(true);return setMsg('GPS no disponible. Usa el QR del bar.')}}const payload={p_employee_name:emp,p_pin:pin,p_type:type,p_note:note,p_gps_lat:coords?.coords?.latitude||null,p_gps_lng:coords?.coords?.longitude||null,p_accuracy:coords?.coords?.accuracy||null,p_method:method};const{data,error}=await supabase.rpc('registrar_fichaje_v2',payload);if(error)return setMsg('❌ '+error.message);setMsg((data?.ok?'✅ ':'❌ ')+(data?.message||'Respuesta recibida')+(data?.distance_m?` · Distancia ${Math.round(data.distance_m)} m`:''));if(!data?.ok&&data?.outside_radius)setQr(true)}return <main className="login"><Brand/><div className="card narrow"><h2>Fichaje empleados</h2><select value={emp} onChange={e=>setEmp(e.target.value)}><option value="">Empleado</option>{employees.map(e=><option key={e.name}>{e.name}</option>)}</select><input placeholder="PIN" type="password" value={pin} onChange={e=>setPin(e.target.value)}/><textarea placeholder="Observaciones" value={note} onChange={e=>setNote(e.target.value)}/><div className="row"><button onClick={()=>clock('entrada')}>Entrada GPS</button><button className="red" onClick={()=>clock('salida')}>Salida GPS</button></div>{qr&&<div className="qrbox"><p>Escanea/usa QR físico del bar como respaldo.</p><button onClick={()=>clock('entrada','qr')}>Entrada QR</button><button className="red" onClick={()=>clock('salida','qr')}>Salida QR</button></div>}<p className="msg">{msg}</p></div></main>}
 function ClockPanel(){const[rows,setRows]=useState([]);const[open,setOpen]=useState([]);useEffect(()=>{load()},[]);async function load(){if(!supabase)return;const{data,error}=await supabase.from('clock_records').select('*').order('created_at',{ascending:false}).limit(500);if(error){alert(error.message);return}const list=data||[];setRows(list);const latest=new Map();list.forEach(r=>{if(!latest.has(r.employee_id||r.employee_name))latest.set(r.employee_id||r.employee_name,r)});setOpen([...latest.values()].filter(r=>r.type==='entrada'))}async function closeManual(r){const now=new Date();const suggested=now.toISOString().slice(0,16);const value=prompt(`Hora de salida real para ${r.employee_name} (formato YYYY-MM-DDTHH:mm)`,suggested);if(!value)return;const reason=prompt('Motivo del cierre manual','Olvido de fichaje')||'Cierre manual por manager';const exitIso=new Date(value).toISOString();const {error}=await supabase.from('clock_records').insert({employee_id:r.employee_id,employee_name:r.employee_name,type:'salida',method:'manual',inside_radius:true,note:`SALIDA MANUAL POR MANAGER · ${reason}`,created_at:exitIso});if(error){alert(error.message);return}alert('Turno cerrado manualmente');load()}return <div className="grid"><div className="card"><h2>Fichajes abiertos</h2><button onClick={load}>Actualizar</button>{open.length===0&&<p>✅ No hay turnos abiertos.</p>}{open.map(r=><div className="employee" key={r.id}><b>{r.employee_name}</b><span>Entrada: {new Date(r.created_at).toLocaleString()}</span><span>{Math.max(0,((Date.now()-new Date(r.created_at))/3600000)).toFixed(1)} h abierto</span><button className="red" onClick={()=>closeManual(r)}>Cerrar turno</button></div>)}</div><div className="card"><h2>Historial de fichajes</h2><table><tbody>{rows.slice(0,120).map(r=><tr key={r.id}><td>{new Date(r.created_at).toLocaleString()}</td><td>{r.employee_name}</td><td>{r.type}</td><td>{r.method}</td><td>{r.note||''}</td><td>{r.distance_m?Math.round(r.distance_m)+' m':''}</td></tr>)}</tbody></table></div></div>}

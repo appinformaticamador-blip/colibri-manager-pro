@@ -1,36 +1,31 @@
-# Colibrí ERP PRO 3.0 — Sprint 3.0.1
+# Sprint 3.0.1 · Centro de Mando PRO
 
-## Centro de Mando Ejecutivo
+Instalación en beta:
 
-Esta entrega está pensada para instalarse primero en la rama `develop` y probarse en `beta.braseria-elcolibri.es`.
+1. Copia todo el contenido de este paquete sobre tu proyecto local `colibri-manager-pro`.
+2. Asegúrate en GitHub Desktop de estar en la rama `develop`.
+3. Commit: `Sprint 3.0.1 Centro de Mando PRO`.
+4. Push origin.
+5. Prueba en `https://beta.braseria-elcolibri.es`.
 
-### Incluye
+## Incluye
 
-- Nuevo Centro de Mando PRO en el dashboard.
-- KPIs principales: ventas, predicción, tickets, comparativa, personal.
+- Nuevo Centro de Mando PRO 3.0.
+- Tarjetas ejecutivas: ventas, tickets, previsión, comparativa semanal, personal y estado LIVE.
 - Objetivo diario inicial: 4.000 €.
 - Tarjeta “Qué deberías saber ahora”.
-- Alertas operativas no invasivas.
-- Detección básica de empleados programados que no han fichado, usando el cuadrante local.
-- Turnos de negocio: desayuno, almuerzo, tarde y cena.
+- Ventas por hora.
+- Alertas inteligentes iniciales:
+  - Sync parado más de 15 minutos.
+  - Empleado con turno en cuadrante local y sin fichar tras 10 minutos.
+  - Previsión de cierre por debajo del 80% del objetivo.
+- Rentabilidad por turnos con coste personal de 7 €/h.
 - Productos TOP.
 - Timeline del día.
-- Visor de ticket al pulsar en últimos tickets.
-- Botón para copiar ticket en formato WhatsApp.
+- Últimos tickets.
 
-### Instalación
+## Importante
 
-1. Descomprime el ZIP.
-2. Copia `src/App.jsx` y `src/styles.css` sobre tu proyecto actual.
-3. Asegúrate de estar en la rama `develop`.
-4. Haz commit:
-   `Sprint 3.0.1 Centro de Mando PRO`
-5. Haz push.
-6. Prueba en `beta.braseria-elcolibri.es`.
+No requiere SQL nuevo. No toca Supabase ni borra datos.
 
-### Notas
-
-- No toca Supabase.
-- No toca Colibrí Sync.
-- No toca producción.
-- Los nombres reales de productos aparecerán cuando el Engine sincronice `articulos.DBF`; mientras tanto usa la descripción/código ya disponible en las líneas.
+Este sprint solo modifica el frontend (`src/App.jsx` y `src/styles.css`).
