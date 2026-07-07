@@ -1,16 +1,14 @@
-# Colibrí ERP PRO - Módulo NUMIER Cloud
+# Colibrí Sync 2.0 (.NET)
 
-Este paquete añade el módulo `sync/colibri_sync_pro` para sincronizar NUMIER con Supabase.
+Aplicación Windows autónoma para leer `C:\NUMIER\DATOS` y enviar registros DBF a Supabase.
 
-No cambia todavía el frontend de Vercel. Solo añade la base de sincronización NUMIER.
+## Instalación
 
-## Qué subir a GitHub
+1. Copia las carpetas `sync/`, `sql/` y `.github/` en el repositorio.
+2. Ejecuta en Supabase el SQL `sql/numier_raw_records.sql`.
+3. Haz commit y push.
+4. En GitHub Actions ejecuta `Build Colibri Sync .NET EXE`.
+5. Descarga el artifact `ColibriSync-DotNet-Windows`.
+6. En el PC del bar abre `config.json` y pega la anon key.
+7. Ejecuta `ColibriSync.exe`.
 
-Sube estas carpetas a la raíz del repositorio:
-
-- `sync/`
-- `sql/`
-- `docs/`
-- `.github/workflows/`
-
-Después haz Commit y Push.

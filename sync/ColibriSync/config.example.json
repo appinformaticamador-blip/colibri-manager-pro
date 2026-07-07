@@ -1,0 +1,6 @@
+{
+  "SupabaseUrl": "https://xccyaoziutlxxklcofrw.supabase.co",
+  "SupabaseAnonKey": "PEGA_AQUI_TU_ANON_KEY",
+  "NumierPath": "C:\\NUMIER\\DATOS",
+  "DbFiles": ["CAB.DBF", "DET.DBF"]
+}
