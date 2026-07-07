@@ -1,6 +1,8 @@
 {
-  "SupabaseUrl": "https://xccyaoziutlxxklcofrw.supabase.co",
-  "SupabaseAnonKey": "PEGA_AQUI_TU_ANON_KEY",
-  "NumierPath": "C:\\NUMIER\\DATOS",
-  "DbFiles": ["CAB.DBF", "DET.DBF"]
+  "numier_path": "C:\\NUMIER\\DATOS",
+  "cabecera_file": "cabecera.DBF",
+  "detalle_file": "detalle.DBF",
+  "supabase_url": "https://xccyaoziutlxxklcofrw.supabase.co",
+  "supabase_anon_key": "PEGA_AQUI_TU_ANON_KEY",
+  "sync_mode": "raw_metadata"
 }
