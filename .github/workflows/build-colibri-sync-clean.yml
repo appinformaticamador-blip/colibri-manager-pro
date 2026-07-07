@@ -1,27 +1,25 @@
 name: Build Colibri Sync Clean EXE
-
 on:
   workflow_dispatch:
   push:
     paths:
-      - 'sync/ColibriSync/**'
+      - 'sync/**'
       - '.github/workflows/build-colibri-sync-clean.yml'
-
 jobs:
   build-windows:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Setup .NET 8
-        uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
-      - name: Publish single EXE
-        run: dotnet publish sync/ColibriSync/ColibriSync.csproj -c Release -r win-x64 --self-contained true /p:PublishSingleFile=true /p:IncludeNativeLibrariesForSelfExtract=true -o publish
-      - name: Copy config example
-        run: copy sync\ColibriSync\config.example.json publish\config.json
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - name: Restore
+        run: dotnet restore sync/ColibriSync/ColibriSync.csproj
+      - name: Publish
+        run: dotnet publish sync/ColibriSync/ColibriSync.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o publish
+      - name: Copy config
+        run: copy sync\ColibriSync\config.json publish\config.json
+      - uses: actions/upload-artifact@v4
         with:
-          name: ColibriSync-Clean-Windows
+          name: ColibriSync-Clean-Windows-v1-2
           path: publish/**
