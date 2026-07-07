@@ -1,19 +1,18 @@
-# Colibrí ERP v2.3 — Inteligencia de Negocio + Productos
+# Colibrí ERP v2.4 — Estado de sincronización NUMIER
 
 ## Incluye
-- Dashboard ejecutivo.
-- Ranking de productos por unidades y facturación.
-- Rentabilidad por turnos: desayuno, almuerzo, tarde y cena.
-- Coste de personal configurado a 7 €/h.
-- Predicción rápida de cierre para el día actual.
-- Informe diario/periodo con botón copiar.
-- Índices SQL para acelerar NUMIER.
+- Barra de progreso de Colibrí Sync en Manager.
+- Estado `SINCRONIZANDO` / `LIVE` / `ACTUALIZADO 100%`.
+- Tickets importados, tickets totales, pendientes y último CAB_ID.
+- Tiempo de última sincronización y porcentaje visible en dashboard.
+- Colibrí Sync v2.4 calcula el progreso leyendo `cabecera.DBF`.
 
 ## Instalación
-1. Ejecuta en Supabase `sql/colibri_erp_v23_bi.sql`.
-2. Sustituye en GitHub los archivos del proyecto por esta versión.
+1. En Supabase ejecuta `sql/colibri_erp_v24_sync_progress.sql`.
+2. Sube a GitHub todo el contenido del proyecto.
 3. Commit + Push.
-4. Vercel despliega automáticamente.
+4. Vercel actualizará el Manager.
+5. En GitHub Actions compila el nuevo Sync y sustituye el EXE anterior.
 
 ## Nota
-No modifica Colibrí Sync v2.2 si ya está funcionando. Esta versión consume los datos que Sync está subiendo a Supabase.
+La primera carga histórica puede tardar. Mientras tanto verás `SINCRONIZANDO XX%`. Cuando llegue al final mostrará `ACTUALIZADO 100% / LIVE`.

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Globalization;
 using System.Net.Http.Headers;
 using System.Text;
@@ -51,7 +52,7 @@ public sealed class ColibriSyncApp
 
     private void Header()
     {
-        Console.WriteLine("🐦 Colibrí Sync 2.2 - NUMIER LIVE seguro → Supabase");
+        Console.WriteLine("🐦 Colibrí Sync 2.4 - NUMIER LIVE + progreso → Supabase");
         Console.WriteLine("------------------------------------------------");
         Console.WriteLine($"Empresa: {_config.BusinessName}");
         Console.WriteLine($"Ruta NUMIER: {_config.NumierPath}");
@@ -73,6 +74,7 @@ public sealed class ColibriSyncApp
         Log($"OK cabecera: {cabInfo.Length:N0} bytes · modificado {cabInfo.LastWriteTime:dd/MM/yyyy HH:mm:ss}");
         Log($"OK detalle: {detInfo.Length:N0} bytes · modificado {detInfo.LastWriteTime:dd/MM/yyyy HH:mm:ss}");
 
+        var sw = Stopwatch.StartNew();
         using var api = SupabaseRest.Create(_config);
         var lastCabId = await api.GetLastCabIdAsync();
         Log($"Último CAB_ID en Supabase: {lastCabId}");
@@ -89,45 +91,63 @@ public sealed class ColibriSyncApp
 
         var newTickets = new List<TicketDto>();
         long maxCabSeen = lastCabId;
-        int scanned = 0, cobrados = 0;
+        int scanned = 0, totalCobrados = 0, importedCobrados = 0;
         foreach (var rec in cabDbf.Records())
         {
             scanned++;
             long cabId = rec.GetLong("CAB_ID");
-            if (cabId <= lastCabId) continue;
             maxCabSeen = Math.Max(maxCabSeen, cabId);
-
             string estado = rec.GetString("CAB_ESTADO");
             if (!estado.Equals("C", StringComparison.OrdinalIgnoreCase)) continue;
-            cobrados++;
+            totalCobrados++;
+            if (cabId <= lastCabId) { importedCobrados++; continue; }
 
-            var fecha = rec.GetDate("CAB_FECHA") ?? DateTime.Today;
-            var hora = rec.GetVfpDateTime("CAB_HORA") ?? fecha;
-            string numdoc = rec.GetString("CAB_NUMDOC");
-            string forma = rec.GetString("CAB_COBRO");
-            decimal tarjeta = rec.GetDecimal("CAB_ENT_TA");
-            decimal cheque = rec.GetDecimal("CAB_ENT_CH");
-
-            newTickets.Add(new TicketDto
+            if (newTickets.Count < _config.MaxTicketsPerSync)
             {
-                CabId = cabId,
-                Fecha = fecha.ToString("yyyy-MM-dd"),
-                Hora = hora.ToUniversalTime().ToString("O"),
-                Estado = estado,
-                FormaPago = forma,
-                Numdoc = numdoc,
-                Tarjeta = tarjeta,
-                Cheque = cheque
-            });
-            if (newTickets.Count >= _config.MaxTicketsPerSync) break;
+                var fecha = rec.GetDate("CAB_FECHA") ?? DateTime.Today;
+                var hora = rec.GetVfpDateTime("CAB_HORA") ?? fecha;
+                string numdoc = rec.GetString("CAB_NUMDOC");
+                string forma = rec.GetString("CAB_COBRO");
+                decimal tarjeta = rec.GetDecimal("CAB_ENT_TA");
+                decimal cheque = rec.GetDecimal("CAB_ENT_CH");
+
+                newTickets.Add(new TicketDto
+                {
+                    CabId = cabId,
+                    Fecha = fecha.ToString("yyyy-MM-dd"),
+                    Hora = hora.ToUniversalTime().ToString("O"),
+                    Estado = estado,
+                    FormaPago = forma,
+                    Numdoc = numdoc,
+                    Tarjeta = tarjeta,
+                    Cheque = cheque
+                });
+            }
         }
 
-        Log($"Cabeceras escaneadas: {scanned:N0}. Cobrados nuevos detectados: {newTickets.Count:N0}. Último CAB_ID visto: {maxCabSeen}");
+        var processedBeforeBatch = importedCobrados;
+        var processedAfterBatchEstimate = Math.Min(totalCobrados, importedCobrados + newTickets.Count);
+        var pctBefore = totalCobrados == 0 ? 100m : Math.Round((decimal)processedBeforeBatch * 100m / totalCobrados, 2);
+        Log($"Cabeceras escaneadas: {scanned:N0}. Cobrados totales: {totalCobrados:N0}. Importados: {processedBeforeBatch:N0} ({pctBefore:N2}%). Nuevos detectados: {newTickets.Count:N0}. Último CAB_ID visto: {maxCabSeen}");
         if (newTickets.Count == 0)
         {
             await api.UpsertSyncFileAsync(_config.CabeceraFile, cabInfo.Length, cabInfo.LastWriteTimeUtc);
             await api.UpsertSyncFileAsync(_config.DetalleFile, detInfo.Length, detInfo.LastWriteTimeUtc);
-            Log("Sin tickets nuevos.");
+            await api.UpsertSyncStatusAsync(new SyncStatusDto
+            {
+                BusinessName = _config.BusinessName,
+                Mode = "LIVE",
+                ProgressPercent = 100,
+                ProcessedTickets = totalCobrados,
+                TotalTickets = totalCobrados,
+                PendingTickets = 0,
+                LastCabId = lastCabId,
+                MaxCabId = maxCabSeen,
+                LastBatchTickets = 0,
+                LastBatchLines = 0,
+                Message = "ACTUALIZADO 100% · ERP en tiempo real"
+            });
+            Log("ACTUALIZADO 100%. Sin tickets nuevos. Modo LIVE.");
             return;
         }
 
@@ -177,7 +197,26 @@ public sealed class ColibriSyncApp
         await api.UpsertLinesAsync(lines);
         await api.UpsertSyncFileAsync(_config.CabeceraFile, cabInfo.Length, cabInfo.LastWriteTimeUtc);
         await api.UpsertSyncFileAsync(_config.DetalleFile, detInfo.Length, detInfo.LastWriteTimeUtc);
-        Log($"Sincronizados {newTickets.Count:N0} tickets y {lines.Count:N0} líneas.");
+        sw.Stop();
+        var processedAfter = Math.Min(totalCobrados, importedCobrados + newTickets.Count);
+        var pending = Math.Max(0, totalCobrados - processedAfter);
+        var pct = totalCobrados == 0 ? 100m : Math.Round((decimal)processedAfter * 100m / totalCobrados, 2);
+        var mode = pending == 0 ? "LIVE" : "SINCRONIZANDO";
+        await api.UpsertSyncStatusAsync(new SyncStatusDto
+        {
+            BusinessName = _config.BusinessName,
+            Mode = mode,
+            ProgressPercent = pct,
+            ProcessedTickets = processedAfter,
+            TotalTickets = totalCobrados,
+            PendingTickets = pending,
+            LastCabId = newTickets.Max(t => t.CabId),
+            MaxCabId = maxCabSeen,
+            LastBatchTickets = newTickets.Count,
+            LastBatchLines = lines.Count,
+            Message = pending == 0 ? "ACTUALIZADO 100% · ERP en tiempo real" : $"SINCRONIZANDO {pct:N1}% · quedan {pending:N0} tickets"
+        });
+        Log($"Sincronizados {newTickets.Count:N0} tickets y {lines.Count:N0} líneas. Progreso: {pct:N2}% ({processedAfter:N0}/{totalCobrados:N0}). Pendientes: {pending:N0}. Tiempo: {sw.Elapsed.TotalSeconds:N1}s");
     }
 
     private static string FirstNonEmpty(params string[] values) => values.FirstOrDefault(v => !string.IsNullOrWhiteSpace(v)) ?? "";
@@ -284,6 +323,12 @@ public sealed class SupabaseRest : IDisposable
         var row = new[] { new SyncFileDto { Source = "numier", FileName = fileName, FileSize = size, ModifiedAt = modifiedUtc.ToString("O"), SyncedAt = DateTime.UtcNow.ToString("O") } };
         await Upsert("numier_sync_files", "source,file_name", row);
     }
+    public async Task UpsertSyncStatusAsync(SyncStatusDto status)
+    {
+        status.StatusKey = "numier";
+        status.UpdatedAt = DateTime.UtcNow.ToString("O");
+        await Upsert("numier_sync_status", "status_key", new[] { status });
+    }
 
     private async Task Upsert<T>(string table, string conflict, IEnumerable<T> rows)
     {
@@ -329,6 +374,22 @@ public sealed class SyncFileDto
     [JsonPropertyName("file_size")] public long FileSize { get; set; }
     [JsonPropertyName("modified_at")] public string? ModifiedAt { get; set; }
     [JsonPropertyName("synced_at")] public string? SyncedAt { get; set; }
+}
+public sealed class SyncStatusDto
+{
+    [JsonPropertyName("status_key")] public string StatusKey { get; set; } = "numier";
+    [JsonPropertyName("business_name")] public string BusinessName { get; set; } = "Brasería El Colibrí";
+    [JsonPropertyName("mode")] public string Mode { get; set; } = "SINCRONIZANDO";
+    [JsonPropertyName("progress_percent")] public decimal ProgressPercent { get; set; }
+    [JsonPropertyName("processed_tickets")] public long ProcessedTickets { get; set; }
+    [JsonPropertyName("total_tickets")] public long TotalTickets { get; set; }
+    [JsonPropertyName("pending_tickets")] public long PendingTickets { get; set; }
+    [JsonPropertyName("last_cab_id")] public long LastCabId { get; set; }
+    [JsonPropertyName("max_cab_id")] public long MaxCabId { get; set; }
+    [JsonPropertyName("last_batch_tickets")] public int LastBatchTickets { get; set; }
+    [JsonPropertyName("last_batch_lines")] public int LastBatchLines { get; set; }
+    [JsonPropertyName("message")] public string? Message { get; set; }
+    [JsonPropertyName("updated_at")] public string? UpdatedAt { get; set; }
 }
 
 public sealed class DbfTable

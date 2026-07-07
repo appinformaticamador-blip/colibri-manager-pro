@@ -2,3 +2,13 @@
 
 .kpi{min-height:120px;display:flex;flex-direction:column;justify-content:center}.kpi span{font-weight:800;color:#53736c}.kpi b{font-size:34px;color:#0b7f6d}.hero{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap}.hero h2{margin:0;font-size:32px}.hero p{margin:4px 0;color:#55736d}.controls{flex-wrap:wrap}.controls input{width:auto;min-width:160px}.barrow{display:grid;grid-template-columns:54px 1fr 90px;gap:10px;align-items:center;margin:10px 0}.barrow div{height:16px;background:#e6f6f1;border-radius:999px;overflow:hidden}.barrow i{display:block;height:100%;background:linear-gradient(90deg,#ff8a00,#ec2f70,#19b394);border-radius:999px}.barrow b{text-align:right}.error{color:#c0392b;font-weight:800}th{text-align:left;padding:8px;border-bottom:2px solid #dcefeb}@media(max-width:700px){.kpi b{font-size:26px}.hero h2{font-size:26px}.barrow{grid-template-columns:50px 1fr 80px}}
 .between{justify-content:space-between;align-items:center;flex-wrap:wrap}.mutedText{color:#55736d}.ok{color:#0b7f6d}.bad{color:#c0392b}.report{background:linear-gradient(135deg,#ffffff,#eafff8)}.reportGrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}.reportGrid p{background:#f4fbf8;border-radius:16px;padding:14px;margin:0}.reportGrid span{display:block;color:#5f7f78;font-weight:800;font-size:13px}.reportGrid b{display:block;color:#073b35;font-size:20px;margin-top:6px}td:nth-child(3),td:nth-child(4),td:nth-child(5),td:nth-child(6){white-space:nowrap}@media(max-width:700px){.reportGrid{grid-template-columns:1fr}.row.between{display:block}}
+
+.syncStatus{border:1px solid rgba(255,255,255,.12)}
+.syncStatus.live{box-shadow:0 0 0 1px rgba(48,209,88,.25),0 16px 40px rgba(0,0,0,.2)}
+.syncStatus.syncing{box-shadow:0 0 0 1px rgba(255,204,0,.25),0 16px 40px rgba(0,0,0,.2)}
+.syncPct{font-size:34px;font-weight:900;color:#7CFF8A;letter-spacing:-1px}
+.progress{height:18px;background:rgba(255,255,255,.12);border-radius:999px;overflow:hidden;margin:14px 0}
+.progress i{display:block;height:100%;background:linear-gradient(90deg,#00C853,#7CFF8A);border-radius:999px;transition:width .5s ease}
+.syncGrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;color:rgba(255,255,255,.82)}
+.syncGrid span{background:rgba(255,255,255,.06);padding:10px;border-radius:14px}
+.syncGrid b{display:block;color:white;margin-top:4px}
