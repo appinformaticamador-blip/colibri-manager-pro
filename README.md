@@ -1,34 +1,20 @@
-# Colibrí ERP v1.1 + Colibrí Sync 2.2
+# Colibrí Sync 3.0 · Importador NUMIER
 
-## Incluye
-- Dashboard con selector de fecha: hoy, día anterior, día siguiente y fecha manual.
-- Lectura de `numier_daily_sales` para ver ventas de días anteriores.
-- Estado de última sincronización NUMIER.
-- Colibrí Sync 2.2 automático cada 60 segundos.
-- Upsert de `numier_sync_files` para no duplicar registros.
+Esta versión lee `cabecera.DBF` y `detalle.DBF` de NUMIER e importa tickets y líneas a Supabase.
 
-## Actualización web
-Copia el contenido de `web/` a la raíz de tu repositorio (`index.html`, `package.json`, `src/`, `public/`, etc.).
-Haz Commit + Push en GitHub Desktop. Vercel desplegará automáticamente.
+## Instalación
+1. Copia estas carpetas al repositorio GitHub:
+   - `sync/`
+   - `sql/`
+   - `.github/`
+2. Ejecuta en Supabase: `sql/numier_import_v3.sql`.
+3. Commit + Push.
+4. GitHub Actions → `Build Colibri Sync .NET EXE`.
+5. Descarga el artifact `ColibriSync-DotNet-Windows`.
+6. Edita `config.json` con tu anon key.
+7. Ejecuta `ColibriSync.exe`.
 
-## Actualización Sync
-Copia estas carpetas a tu repositorio:
-- `sync/`
-- `.github/`
-- `sql/`
-
-Haz Commit + Push.
-En GitHub Actions ejecuta: **Build Colibri Sync .NET EXE**.
-Descarga el artifact `ColibriSync-DotNet-Windows-v2-2`.
-
-## Supabase
-Ejecuta una vez:
-`sql/numier_dashboard_v52.sql`
-
-## PC del bar
-Edita `config.json`:
-- `auto_sync`: true
-- `interval_seconds`: 60
-- `numier_path`: `C:\NUMIER\DATOS`
-
-Abre `ColibriSync.exe`. Ya no tendrás que pulsar sincronizar manualmente.
+## DBF detectados
+- cabecera: `cabecera.DBF`
+- detalle: `detalle.DBF`
+- unión: `cabecera.CAB_ID = detalle.DET_ID`
