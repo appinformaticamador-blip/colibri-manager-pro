@@ -4,5 +4,7 @@
   "detalle_file": "detalle.DBF",
   "supabase_url": "https://xccyaoziutlxxklcofrw.supabase.co",
   "supabase_anon_key": "PEGA_AQUI_TU_ANON_KEY",
-  "sync_mode": "raw_metadata"
+  "sync_mode": "raw_metadata",
+  "auto_sync": true,
+  "interval_seconds": 60
 }

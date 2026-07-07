@@ -22,29 +22,43 @@ public class SyncConfig
     public string supabase_url { get; set; } = "";
     public string supabase_anon_key { get; set; } = "";
     public string sync_mode { get; set; } = "raw_metadata";
+    public bool auto_sync { get; set; } = true;
+    public int interval_seconds { get; set; } = 60;
 }
 
 public class MainForm : Form
 {
     private readonly TextBox log = new() { Multiline = true, Dock = DockStyle.Fill, ScrollBars = ScrollBars.Vertical, ReadOnly = true };
     private readonly Button syncButton = new() { Text = "Sincronizar ahora", Dock = DockStyle.Top, Height = 34 };
+    private readonly Button autoButton = new() { Text = "Pausar automático", Dock = DockStyle.Top, Height = 34 };
     private readonly Button configButton = new() { Text = "Abrir config.json", Dock = DockStyle.Top, Height = 34 };
+    private readonly System.Windows.Forms.Timer autoTimer = new();
+    private bool autoEnabled = true;
+    private bool syncing = false;
     private readonly string configPath = Path.Combine(AppContext.BaseDirectory, "config.json");
     private SyncConfig config = new();
 
     public MainForm()
     {
-        Text = "Colibrí Sync 2.1";
+        Text = "Colibrí Sync 2.2";
         Width = 760;
         Height = 520;
         Controls.Add(log);
         Controls.Add(configButton);
+        Controls.Add(autoButton);
         Controls.Add(syncButton);
         syncButton.Click += async (_, _) => await SyncNow();
+        autoButton.Click += (_, _) => ToggleAuto();
         configButton.Click += (_, _) => OpenConfig();
         LoadConfig();
+        autoEnabled = config.auto_sync;
+        autoTimer.Tick += async (_, _) => { if (autoEnabled && !syncing) await SyncNow(true); };
+        autoTimer.Interval = Math.Max(10, config.interval_seconds) * 1000;
+        autoTimer.Start();
+        autoButton.Text = autoEnabled ? "Pausar automático" : "Activar automático";
         Log("Listo. Ruta NUMIER: " + config.numier_path);
         Log("Archivos: " + config.cabecera_file + " / " + config.detalle_file);
+        Log("Auto-sync: " + (autoEnabled ? $"activo cada {config.interval_seconds}s" : "pausado"));
     }
 
     private void LoadConfig()
@@ -68,14 +82,23 @@ public class MainForm : Form
         System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(configPath) { UseShellExecute = true });
     }
 
-    private async Task SyncNow()
+    private void ToggleAuto()
     {
+        autoEnabled = !autoEnabled;
+        autoButton.Text = autoEnabled ? "Pausar automático" : "Activar automático";
+        Log("Auto-sync " + (autoEnabled ? "activado" : "pausado"));
+    }
+
+    private async Task SyncNow(bool automatic=false)
+    {
+        if (syncing) return;
+        syncing = true;
         LoadConfig();
         try
         {
             var cab = Path.Combine(config.numier_path, config.cabecera_file);
             var det = Path.Combine(config.numier_path, config.detalle_file);
-            Log("Comprobando ruta: " + config.numier_path);
+            Log((automatic?"Auto: ":"") + "Comprobando ruta: " + config.numier_path);
             if (!Directory.Exists(config.numier_path)) { Log("ERROR: No existe la ruta NUMIER."); return; }
             if (!File.Exists(cab)) { Log("No encontrado: " + config.cabecera_file); return; }
             if (!File.Exists(det)) { Log("No encontrado: " + config.detalle_file); return; }
@@ -98,12 +121,16 @@ public class MainForm : Form
                 new { source="numier", file_name=config.cabecera_file, file_size=cabInfo.Length, modified_at=cabInfo.LastWriteTimeUtc.ToString("O"), synced_at=DateTime.UtcNow.ToString("O") },
                 new { source="numier", file_name=config.detalle_file, file_size=detInfo.Length, modified_at=detInfo.LastWriteTimeUtc.ToString("O"), synced_at=DateTime.UtcNow.ToString("O") }
             };
-            var url = config.supabase_url.TrimEnd('/') + "/rest/v1/numier_sync_files";
-            var res = await http.PostAsync(url, new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json"));
+            var url = config.supabase_url.TrimEnd('/') + "/rest/v1/numier_sync_files?on_conflict=file_name";
+            var req = new HttpRequestMessage(HttpMethod.Post, url);
+            req.Headers.Add("Prefer", "resolution=merge-duplicates");
+            req.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
+            var res = await http.SendAsync(req);
             var body = await res.Content.ReadAsStringAsync();
             Log(res.IsSuccessStatusCode ? "Sincronización registrada en Supabase." : "Error Supabase: " + res.StatusCode + " " + body);
         }
         catch (Exception ex) { Log("ERROR: " + ex); }
+        finally { syncing = false; }
     }
 
     private void Log(string msg) => log.AppendText($"[{DateTime.Now:HH:mm:ss}] {msg}{Environment.NewLine}");

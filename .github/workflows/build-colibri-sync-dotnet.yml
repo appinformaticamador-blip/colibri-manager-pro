@@ -19,5 +19,5 @@ jobs:
         run: copy sync\ColibriSync\config.example.json publish\config.example.json
       - uses: actions/upload-artifact@v4
         with:
-          name: ColibriSync-DotNet-Windows-v2-1
+          name: ColibriSync-DotNet-Windows-v2-2
           path: publish/**
