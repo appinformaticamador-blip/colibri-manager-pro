@@ -1,47 +1,32 @@
-# Colibrí Sync 2.0
+# Colibrí ERP v1.2 - Cierre manual de turnos
 
-Sincronizador NUMIER → Supabase para Brasería El Colibrí.
+ERP Cloud para Brasería El Colibrí.
 
-## Configuración incluida
+## Instalación rápida
 
-No hay que editar `config.json`. La configuración va integrada:
+1. Ejecutar `supabase/colibri_erp_clean_v1.sql` en Supabase SQL Editor.
+2. Subir este proyecto a GitHub.
+3. Vercel despliega automáticamente.
+4. Variables necesarias en Vercel:
+   - `VITE_SUPABASE_URL`
+   - `VITE_SUPABASE_ANON_KEY`
 
-- Ruta NUMIER: `C:\NUMIER\DATOS`
-- Cabecera: `cabecera.DBF`
-- Detalle: `detalle.DBF`
-- Supabase: proyecto de Brasería El Colibrí
-- Auto-sync: 60 segundos
-- Límite por sincronización: 500 tickets
+Accesos:
+- Manager: `manager.braseria-elcolibri.es`
+- Fichaje: `fichar.braseria-elcolibri.es`
 
-## Instalación
+Clave manager temporal: `131313`.
 
-1. Ejecutar en Supabase `sql/colibri_numier_sync_v2.sql`.
-2. Subir al repositorio:
-   - `sync/`
-   - `sql/`
-   - `.github/`
-   - `README.md`
+## Novedad v1.2
+
+- En **Manager → Fichajes** aparece una sección **Fichajes abiertos**.
+- Permite cerrar manualmente el turno de un empleado si olvidó fichar salida.
+- El cierre queda registrado como `SALIDA MANUAL POR MANAGER` con motivo y hora real.
+
+## Actualización
+
+1. Ejecuta en Supabase el archivo:
+   `supabase/colibri_erp_v12_cierre_manager.sql`
+2. Sube el contenido del proyecto a GitHub.
 3. Commit + Push.
-4. GitHub → Actions → `Build Colibri Sync 2.0 EXE`.
-5. Descargar artifact `ColibriSync-2-0-Windows`.
-6. En el PC del bar, ejecutar `ColibriSync.exe`.
-
-## Uso
-
-- Pulsa `S` para sincronizar manualmente.
-- Pulsa `Q` para salir.
-- También sincroniza solo cada 60 segundos.
-
-## Mapeo NUMIER
-
-- `cabecera.CAB_ID` → ID ticket
-- `cabecera.CAB_FECHA` → fecha
-- `cabecera.CAB_HORA` → hora
-- `cabecera.CAB_ESTADO` → estado (`C` cobrado)
-- `cabecera.CAB_COBRO` → forma de cobro
-- `cabecera.CAB_NUMDOC` → número documento
-- `cabecera.CAB_ENT_TA` → tarjeta
-- `cabecera.CAB_ENT_CH` → cheque
-- `detalle.DET_ID` → relación con `CAB_ID`
-- `detalle.DET_IMPORT` → importe línea
-- `detalle.DET_TIPO_I` → IVA
+4. Vercel desplegará automáticamente.
