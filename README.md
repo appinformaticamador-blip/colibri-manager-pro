@@ -1,18 +1,16 @@
-# Colibrí ERP 1.0
+# Colibrí ERP PRO - Módulo NUMIER Cloud
 
-ERP Cloud para Brasería El Colibrí.
+Este paquete añade el módulo `sync/colibri_sync_pro` para sincronizar NUMIER con Supabase.
 
-## Instalación rápida
+No cambia todavía el frontend de Vercel. Solo añade la base de sincronización NUMIER.
 
-1. Ejecutar `supabase/colibri_erp_clean_v1.sql` en Supabase SQL Editor.
-2. Subir este proyecto a GitHub.
-3. Vercel despliega automáticamente.
-4. Variables necesarias en Vercel:
-   - `VITE_SUPABASE_URL`
-   - `VITE_SUPABASE_ANON_KEY`
+## Qué subir a GitHub
 
-Accesos:
-- Manager: `manager.braseria-elcolibri.es`
-- Fichaje: `fichar.braseria-elcolibri.es`
+Sube estas carpetas a la raíz del repositorio:
 
-Clave manager temporal: `131313`.
+- `sync/`
+- `sql/`
+- `docs/`
+- `.github/workflows/`
+
+Después haz Commit y Push.

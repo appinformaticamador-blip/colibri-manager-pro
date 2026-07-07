@@ -1,0 +1,34 @@
+name: Build Colibri Sync EXE
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        working-directory: sync/colibri_sync_pro
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller==6.11.1
+      - name: Build EXE
+        working-directory: sync/colibri_sync_pro
+        run: |
+          pyinstaller --onefile --name ColibriSync colibri_sync.py
+      - name: Package
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force dist_package
+          Copy-Item sync/colibri_sync_pro/dist/ColibriSync.exe dist_package/ColibriSync.exe
+          Copy-Item sync/colibri_sync_pro/config.example.json dist_package/config.example.json
+          Copy-Item sync/colibri_sync_pro/README_SYNC.md dist_package/README_SYNC.md
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ColibriSync-Windows
+          path: dist_package/

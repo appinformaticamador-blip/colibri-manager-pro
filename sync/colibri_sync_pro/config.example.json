@@ -1,0 +1,11 @@
+{
+  "supabase_url": "https://xccyaoziutlxxklcofrw.supabase.co",
+  "supabase_anon_key": "PEGA_AQUI_TU_ANON_KEY",
+  "numier_data_path": "C:\\NUMIER\\DATOS",
+  "sync_interval_seconds": 60,
+  "restaurant_id": "braseria-el-colibri",
+  "tables": {
+    "tickets": "numier_tickets",
+    "sync_log": "numier_sync_log"
+  }
+}
