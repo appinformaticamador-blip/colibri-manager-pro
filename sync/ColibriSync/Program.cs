@@ -139,15 +139,38 @@ public sealed class ColibriSyncApp
         if (openAccounts.Count > 0)
         {
             var openTotals = new Dictionary<long, decimal>();
+            var openLines = new List<TicketLineDto>();
+            int openDetailScanned = 0;
             foreach (var r in detDbf.Records())
             {
+                openDetailScanned++;
                 long cabId = r.GetLong("DET_ID");
                 if (!openIds.Contains(cabId)) continue;
-                openTotals[cabId] = openTotals.GetValueOrDefault(cabId) + r.GetDecimal("DET_IMPORT");
+                decimal importe = r.GetDecimal("DET_IMPORT");
+                openTotals[cabId] = openTotals.GetValueOrDefault(cabId) + importe;
+                var lineId = r.GetLong("ID");
+                if (lineId <= 0) lineId = openDetailScanned;
+                string artCode = r.GetString("DET_ARTICU");
+                openLines.Add(new TicketLineDto
+                {
+                    CabId = cabId,
+                    LineKey = $"{cabId}-{lineId}",
+                    Articulo = artCode,
+                    Descripcion = ArticleName(articleMap, artCode, FirstNonEmpty(r.GetString("DET_CAD_PR"), r.GetString("DET_OPCION"))),
+                    Cantidad = r.GetDecimal("DET_CANTID"),
+                    Precio = r.GetDecimal("DET_PRECIO"),
+                    Importe = importe,
+                    Iva = r.GetDecimal("DET_TIPO_I")
+                });
             }
             foreach (var oa in openAccounts)
             {
                 if (oa.Total <= 0 && openTotals.TryGetValue(oa.CabId, out var tv)) oa.Total = tv;
+            }
+            if (openLines.Count > 0)
+            {
+                await api.UpsertLinesAsync(openLines);
+                Log($"Líneas de cuentas abiertas sincronizadas: {openLines.Count:N0}");
             }
         }
         await api.UpsertOpenAccountsAsync(openAccounts);

@@ -109,51 +109,27 @@ async function loadArticlesMap(){
  return map;
 }
 async function loadSmartGoal(date,currentTotal=0){
- if(!supabase)return {goal:750,base:0,projected:currentTotal,source:'objetivo base',message:'Objetivo base configurado',history:null};
+ if(!supabase)return {goal:750,base:0,projected:currentTotal,source:'objetivo base',message:'Objetivo base configurado'};
  const target=new Date(date+'T12:00:00');
- // IA histórica: usa hasta 4 años de histórico diario si está cargado en Supabase.
- const from=new Date(target); from.setDate(from.getDate()-1460);
- const {data,error}=await supabase
-  .from('numier_daily_sales')
-  .select('fecha,total,tickets,ticket_medio')
-  .gte('fecha',from.toISOString().slice(0,10))
-  .lt('fecha',date)
-  .order('fecha',{ascending:true})
-  .limit(5000);
+ const from=new Date(target); from.setDate(from.getDate()-420);
+ const {data}=await supabase.from('numier_daily_sales').select('fecha,total,tickets,ticket_medio').gte('fecha',from.toISOString().slice(0,10)).lt('fecha',date).order('fecha',{ascending:false}).limit(500);
  const rows=(data||[]).filter(r=>Number(r.total||0)>0);
- const sameWeekday=rows.filter(r=>new Date(r.fecha+'T12:00:00').getDay()===target.getDay());
- const recentSame=sameWeekday.slice(-12);
- const avgSame=recentSame.length?recentSame.reduce((a,r)=>a+Number(r.total||0),0)/recentSame.length:0;
- const sameMonth=rows.filter(r=>{const d=new Date(r.fecha+'T12:00:00');return d.getMonth()===target.getMonth();}).slice(-90);
- const avgMonth=sameMonth.length?sameMonth.reduce((a,r)=>a+Number(r.total||0),0)/sameMonth.length:0;
- const ly=new Date(target); ly.setFullYear(ly.getFullYear()-1); const lyStart=new Date(ly); lyStart.setDate(lyStart.getDate()-30); const lyEnd=new Date(ly); lyEnd.setDate(lyEnd.getDate()+30);
+ const sameWeekday=rows.filter(r=>new Date(r.fecha+'T12:00:00').getDay()===target.getDay()).slice(0,12);
+ const avgSame=sameWeekday.length?sameWeekday.reduce((a,r)=>a+Number(r.total||0),0)/sameWeekday.length:0;
+ const ly=new Date(target); ly.setFullYear(ly.getFullYear()-1); const lyStart=new Date(ly); lyStart.setDate(lyStart.getDate()-14); const lyEnd=new Date(ly); lyEnd.setDate(lyEnd.getDate()+14);
  const sameLastYear=rows.filter(r=>{const d=new Date(r.fecha+'T12:00:00');return d>=lyStart&&d<=lyEnd&&d.getDay()===target.getDay();});
  const avgYear=sameLastYear.length?sameLastYear.reduce((a,r)=>a+Number(r.total||0),0)/sameLastYear.length:0;
- const last90=rows.slice(-90); const avg90=last90.length?last90.reduce((a,r)=>a+Number(r.total||0),0)/last90.length:0;
  let base=0,source='';
- if(avgYear>0&&avgSame>0&&avgMonth>0){base=(avgYear*0.45)+(avgSame*0.35)+(avgMonth*0.20);source='año anterior + mismos días + época actual';}
- else if(avgYear>0&&avgSame>0){base=(avgYear*0.6)+(avgSame*0.4);source='año anterior + últimos mismos días';}
+ if(avgYear>0&&avgSame>0){base=(avgYear*0.6)+(avgSame*0.4);source='año anterior + últimos mismos días';}
  else if(avgSame>0){base=avgSame;source='últimos mismos días de la semana';}
- else if(avg90>0){base=avg90;source='media últimos 90 días';}
  else {base=750/1.10;source='objetivo base';}
  const goal=Math.round(base*(1+SMART_GROWTH_TARGET));
- let elapsed=1;
- if(date===today()){
-  const now=new Date();
-  const hour=now.getHours()+now.getMinutes()/60;
-  // curva simple inicial: 08:00 a 23:30; se irá refinando con histórico horario.
-  elapsed=Math.max(0.06,Math.min(1,(hour-8)/(23.5-8)));
- }
+ let elapsed=1;if(date===today()){const now=new Date();const hour=now.getHours()+now.getMinutes()/60;elapsed=Math.max(0.08,Math.min(1,(hour-8)/(23.5-8)));}
  const projected=date===today()?Math.max(currentTotal,currentTotal/elapsed):currentTotal;
  const diff=currentTotal-goal;
- const first=rows[0]?.fecha||null; const last=rows[rows.length-1]?.fecha||null;
- const years=[...new Set(rows.map(r=>String(r.fecha).slice(0,4)))];
- const totalTickets=rows.reduce((a,r)=>a+Number(r.tickets||0),0);
- const history={first,last,days:rows.length,years,totalTickets,avgSame,avgYear,avgMonth,avg90,source,error:error?.message||null};
  const message=currentTotal>=goal?`Objetivo IA superado en ${money(diff)}.`:`Faltan ${money(Math.abs(diff))} para alcanzar el objetivo IA de hoy.`;
- return {goal,base,projected,source,message,avgSame,avgYear,avgMonth,avg90,growth:SMART_GROWTH_TARGET,history};
+ return {goal,base,projected,source,message,avgSame,avgYear,growth:SMART_GROWTH_TARGET};
 }
-
 async function loadSalesRange(from,to){
  if(!supabase)return {tickets:[],lines:[],sync:null,articles:new Map()};
  const start=from+'T00:00:00'; const end=to+'T00:00:00';
@@ -166,6 +142,48 @@ async function loadSalesRange(from,to){
  for(let i=0;i<cabIds.length;i+=200){const chunk=cabIds.slice(i,i+200);const {data}=await supabase.from('numier_ticket_lines').select('*').in('cab_id',chunk).limit(10000);if(data)lines=lines.concat(data);}
  return {tickets,lines,sync:syncData?.[0]||null,articles};
 }
+
+async function loadTicketFull(cabId, fallbackHeader=null){
+ if(!supabase||!cabId)return {header:fallbackHeader,lines:[],articles:new Map(),error:'Supabase no configurado'};
+ const [ticketRes, openRes, linesRes, articles] = await Promise.all([
+  supabase.from('numier_tickets').select('*').eq('cab_id',cabId).maybeSingle(),
+  supabase.from('numier_open_accounts').select('*').eq('cab_id',cabId).maybeSingle(),
+  supabase.from('numier_ticket_lines').select('*').eq('cab_id',cabId).order('line_key',{ascending:true}),
+  loadArticlesMap()
+ ]);
+ const header=ticketRes.data||openRes.data||fallbackHeader||{cab_id:cabId};
+ return {header,lines:linesRes.data||[],articles,error:ticketRes.error?.message||openRes.error?.message||linesRes.error?.message||null};
+}
+function buildTicketWhatsapp(ticket){
+ const h=ticket?.header||{}; const lines=ticket?.lines||[];
+ const total=Number(h.total||lines.reduce((a,l)=>a+Number(l.importe||0),0));
+ const title=h.status==='P'||h.estado==='P'?'CUENTA ABIERTA':'TICKET';
+ const rows=lines.map(l=>`${Number(l.cantidad||0).toFixed(2)} x ${l.descripcion||l.articulo||'Producto'}  ${money(l.importe)}`).join('\n');
+ return `BRASERÍA EL COLIBRÍ\n${title}: ${h.numdoc||h.cab_id||''}\nMesa/Cuenta: ${h.mesa_numero||h.mesa||'-'}\nFecha: ${h.hora||h.opened_at?new Date(h.hora||h.opened_at).toLocaleString('es-ES'):'-'}\n\n${rows||'Sin líneas de detalle'}\n\nTOTAL: ${money(total)}`;
+}
+function TicketViewer({ticket,onClose}){
+ if(!ticket)return null;
+ const h=ticket.header||{}; const lines=ticket.lines||[];
+ const total=Number(h.total||lines.reduce((a,l)=>a+Number(l.importe||0),0));
+ const isOpen=String(h.status||h.estado||'').toUpperCase()==='P'||!!h.opened_at;
+ const title=isOpen?(h.zona==='barra'?'Cuenta rápida abierta':`Mesa ${h.mesa_numero||h.mesa||'-'}`):`Ticket ${h.numdoc||h.cab_id||''}`;
+ return <div className="modal" onClick={onClose}><div className="card ticketModal" onClick={e=>e.stopPropagation()}>
+  <div className="row between"><div><h2>{title}</h2><p className="mutedText">CAB_ID {h.cab_id||'-'} · {isOpen?'Cuenta abierta':'Ticket cerrado'}</p></div><button className="red" onClick={onClose}>Cerrar</button></div>
+  <div className="ticketHead">
+   <p><span>Fecha / hora</span><b>{(h.hora||h.opened_at)?new Date(h.hora||h.opened_at).toLocaleString('es-ES'):'-'}</b></p>
+   <p><span>Mesa / cuenta</span><b>{h.mesa_numero||h.mesa||'-'}</b></p>
+   <p><span>Zona</span><b>{h.zona?zoneLabel(h.zona):'-'}</b></p>
+   <p><span>Pago</span><b>{h.forma_pago||'-'}</b></p>
+  </div>
+  <table className="ticketLines"><thead><tr><th>Producto</th><th>Ud</th><th>Precio</th><th>Total</th></tr></thead><tbody>
+   {lines.map((l,i)=><tr key={l.line_key||i}><td><b>{l.descripcion||l.articulo||'Producto'}</b>{l.articulo&&<small className="mutedCode">{l.articulo}</small>}</td><td>{Number(l.cantidad||0).toFixed(2)}</td><td>{money(l.precio)}</td><td>{money(l.importe)}</td></tr>)}
+  </tbody></table>
+  {lines.length===0&&<p className="mutedText">No hay líneas de detalle para este ticket. Revisa que el Engine esté sincronizando detalle.DBF para cuentas abiertas y cerradas.</p>}
+  <div className="ticketTotal"><span>TOTAL</span><b>{money(total)}</b></div>
+  <div className="row"><button onClick={()=>navigator.clipboard.writeText(buildTicketWhatsapp(ticket))}>Copiar WhatsApp</button><button onClick={()=>window.print()}>Imprimir</button></div>
+ </div></div>
+}
+
 function summarizeTickets(tickets){
  const total=tickets.reduce((a,t)=>a+Number(t.total||0),0);
  const efectivo=tickets.reduce((a,t)=>a+Number(t.efectivo||0),0);
@@ -227,8 +245,18 @@ function ServiceTable({def,account,onOpen}){
  </button>
 }
 function ServiceZoneMap({title,tables,openByMesa,onOpen}){return <div className="serviceZone"><h3>{title}</h3><div className="floorGrid">{tables.map(t=><ServiceTable key={t.n} def={t} account={openByMesa.get(t.n)} onOpen={onOpen}/>)}</div></div>}
-function MesaModal({account,onClose}){if(!account)return null;return <TicketDetailModal account={account} onClose={onClose}/>}
-
+function MesaModal({account,onClose}){
+ const[ticket,setTicket]=useState(null);const[loading,setLoading]=useState(false);
+ useEffect(()=>{if(account?.cab_id){setLoading(true);loadTicketFull(account.cab_id,account).then(t=>{setTicket(t);setLoading(false)})}},[account?.cab_id]);
+ if(!account)return null;
+ const mins=minutesOpen(account.opened_at);
+ return <div className="modal" onClick={onClose}><div className="card mesaModal" onClick={e=>e.stopPropagation()}>
+  <div className="row between"><h2>{account.zona==='barra'?'Cuenta rápida':`Mesa ${account.mesa_numero}`}</h2><button className="red" onClick={onClose}>Cerrar</button></div>
+  <div className="mesaModalGrid"><p><span>Estado</span><b>Cuenta abierta</b></p><p><span>Consumo actual</span><b>{money(account.total)}</b></p><p><span>Tiempo abierta</span><b>{durationShort(mins)}</b></p><p><span>Zona</span><b>{account.zona==='terraza'?'Terraza':account.zona==='salon'?'Salón':'Barra'}</b></p><p><span>Apertura</span><b>{account.opened_at?new Date(account.opened_at).toLocaleTimeString('es-ES'): '-'}</b></p><p><span>CAB_ID</span><b>{account.cab_id}</b></p></div>
+  <h3>Ticket en curso</h3>
+  {loading?<p>Cargando productos...</p>:ticket&&<div className="inlineTicket"><table className="ticketLines"><thead><tr><th>Producto</th><th>Ud</th><th>Total</th></tr></thead><tbody>{(ticket.lines||[]).map((l,i)=><tr key={l.line_key||i}><td><b>{l.descripcion||l.articulo||'Producto'}</b></td><td>{Number(l.cantidad||0).toFixed(2)}</td><td>{money(l.importe)}</td></tr>)}</tbody></table>{(!ticket.lines||ticket.lines.length===0)&&<p className="mutedText">Sin líneas de detalle sincronizadas todavía.</p>}<div className="ticketTotal"><span>Total cuenta</span><b>{money(account.total)}</b></div><button onClick={()=>navigator.clipboard.writeText(buildTicketWhatsapp(ticket))}>Copiar WhatsApp</button></div>}
+ </div></div>
+}
 function EstadoServicio(){
  const[state,setState]=useState({open:[],status:null,error:null});
  const[daily,setDaily]=useState(null);
@@ -323,7 +351,6 @@ function Dashboard(){
   <SyncStatusCard/>
   <div className="proGrid"><div className="proKpi"><span>Ventas hoy</span><b>{money(summary.total)}</b><em>{formatPct(vsPrev)} vs semana pasada</em></div><div className="proKpi"><span>Objetivo IA +10%</span><b>{money(objective)}</b><em>{progress.toFixed(1)}% conseguido</em></div><div className="proKpi"><span>Predicción cierre</span><b>{money(projected)}</b><em>{projected>=objective?'por encima':'por debajo'} del objetivo</em></div><div className="proKpi"><span>Tickets</span><b>{summary.tickets}</b><em>{money(summary.ticket_medio)} ticket medio</em></div><div className="proKpi"><span>Personal</span><b>{working.length}</b><em>trabajando ahora</em></div></div>
   <div className="card objectiveCard"><div className="row between"><h2>{statusColor} Objetivo inteligente</h2><b>{progress.toFixed(1)}%</b></div><div className="progress"><i style={{width:`${progress}%`}}></i></div><p>{aiText}</p><p className="mutedText">Crecimiento objetivo aplicado: +10% sobre histórico comparable.</p></div>
-  <div className="card historyBrain"><h2>🧠 IA histórica</h2><div className="historyGrid"><p><span>Datos desde</span><b>{state.goal?.history?.first||'-'}</b></p><p><span>Hasta</span><b>{state.goal?.history?.last||'-'}</b></p><p><span>Días analizados</span><b>{Number(state.goal?.history?.days||0).toLocaleString('es-ES')}</b></p><p><span>Tickets históricos</span><b>{Number(state.goal?.history?.totalTickets||0).toLocaleString('es-ES')}</b></p><p><span>Años</span><b>{(state.goal?.history?.years||[]).join(', ')||'-'}</b></p><p><span>Fuente objetivo</span><b>{state.goal?.source||'-'}</b></p></div><p className="mutedText">La predicción usa el histórico disponible en Supabase. Si aquí no aparece 2023, falta reconstruir/volcar ese histórico en tablas agregadas.</p></div>
   <div className="grid"><div className="card"><h2>🧠 Qué deberías saber ahora</h2><p>{aiText}</p><p>Media últimos días similares: <b>{state.avgSameDay?money(state.avgSameDay):'-'}</b></p></div><div className="card"><h2>📈 Ventas por hora</h2><SalesByHour tickets={state.tickets}/></div><div className="card"><h2>👥 Trabajando ahora</h2><div className="big">{working.length}</div>{working.map(w=><p key={w.id}>🟢 {w.employee_name}</p>)}</div></div>
   <div className="grid"><div className="card"><h2>🥇 Productos TOP</h2>{topProducts.length?topProducts.map((p,i)=><p key={p.name}>{i===0?'🥇':i===1?'🥈':i===2?'🥉':i+1} <b>{p.name}</b> · {p.qty.toFixed(0)} uds · {money(p.total)}</p>):<p>Sin productos en el periodo.</p>}</div><div className="card"><h2>🕒 Timeline del día</h2>{timeline.length?timeline.map((e,i)=><p key={i}><b>{safeHour(e.time)}</b> {e.icon} {e.text}</p>):<p>Aún sin eventos suficientes.</p>}</div></div>
   <ProductRanking lines={state.lines} articles={state.articles}/>
@@ -335,29 +362,6 @@ function ClockPanel(){const[rows,setRows]=useState([]);const[open,setOpen]=useSt
 function Schedule(){const [data,setData]=useState(()=>JSON.parse(localStorage.colibriSchedule||'{}'));const [selected,setSelected]=useState(null);const [employees,setEmployees]=useState([]);useEffect(()=>{supabase?.from('employees').select('*').eq('active',true).then(({data})=>setEmployees(data||[]))},[]);function key(d,s){return `${week()}|${d}|${s}`}function toggle(emp){const k=key(selected.d,selected.s);let arr=data[k]||[];arr=arr.find(x=>x.id===emp.id)?arr.filter(x=>x.id!==emp.id):(arr.length<3?[...arr,emp]:arr);const nd={...data,[k]:arr};setData(nd);localStorage.colibriSchedule=JSON.stringify(nd)}function hours(){const m={};Object.entries(data).forEach(([k,arr])=>{const slot=k.split('|')[2];arr.forEach(e=>m[e.name]=(m[e.name]||0)+h(slot))});return m}return <div className="card"><h2>Cuadrante semanal {week()}</h2><table className="schedule"><thead><tr><th>Hora</th>{DAYS.map(d=><th>{d}</th>)}</tr></thead><tbody>{SLOTS.map(s=><tr><td>{s}</td>{DAYS.map(d=><td onClick={()=>setSelected({d,s})}>{(data[key(d,s)]||[]).map(e=><span className="badge" style={{background:e.color}}>{e.name}</span>)}</td>)}</tr>)}</tbody></table><h3>Horas</h3>{Object.entries(hours()).map(([n,v])=><p>{n}: {v} h</p>)}{selected&&<div className="modal"><div className="card narrow"><h3>{selected.d} {selected.s}</h3>{employees.map(e=><button className="empbtn" onClick={()=>toggle(e)}><span className="sq" style={{background:e.color}}/> {e.name}</button>)}<button onClick={()=>setSelected(null)}>Guardar y cerrar</button></div></div>}</div>}
 function Compare(){const[text,setText]=useState('');const[name,setName]=useState('');function calc(){const clean=text.replace(/_/g,'');let total=0;for(const line of clean.split('\n')){const times=[...line.matchAll(/entrada\s*(\d{1,2}):(\d{2})\s*salida\s*(\d{1,2}):(\d{2})/gi)];const seen=new Set();times.forEach(m=>{const k=m[0];if(seen.has(k))return;seen.add(k);const a=+m[1]*60+ +m[2],b=+m[3]*60+ +m[4];if(b>a)total+=(b-a)/60})}return total}return <div className="card"><h2>Comparador WhatsApp vs cuadrante</h2><input placeholder="Empleado" value={name} onChange={e=>setName(e.target.value)}/><textarea rows="12" placeholder="Pega plantilla WhatsApp" value={text} onChange={e=>setText(e.target.value)}/><h3>Horas declaradas detectadas: {calc()} h</h3><p>Compara este total con el resumen de cuadrante semanal.</p></div>}
 
-function TPV(){
- const[date,setDate]=useState(today());
- const[data,setData]=useState({daily:null,tickets:[],sync:null,error:null});
- const[loading,setLoading]=useState(false);
- const[selected,setSelected]=useState(null);
- const[search,setSearch]=useState('');
- useEffect(()=>{load();const t=setInterval(load,30000);return()=>clearInterval(t)},[date]);
- async function load(){setLoading(true);const d=await loadSalesForDate(date);setData(d);setLoading(false)}
- async function searchTicket(){
-  const q=search.trim(); if(!q||!supabase)return;
-  let res;
-  if(/^\d+$/.test(q))res=await supabase.from('numier_tickets').select('*').eq('cab_id',Number(q)).maybeSingle();
-  else res=await supabase.from('numier_tickets').select('*').ilike('numdoc',`%${q}%`).order('hora',{ascending:false}).limit(1).maybeSingle();
-  if(res.error||!res.data){alert('Ticket no encontrado');return}
-  setSelected(res.data);
- }
- const tickets=data.tickets||[];
- return <div><div className="card hero"><div><h2>NUMIER LIVE</h2><p>Ventas, tickets y formas de pago desde Colibrí Sync.</p></div><div className="row controls"><button onClick={()=>setDate(today())}>Hoy</button><button onClick={()=>setDate(addDays(today(),-1))}>Ayer</button><button onClick={()=>setDate(addDays(date,-1))}>◀ Día</button><button onClick={()=>setDate(addDays(date,1))}>Día ▶</button><input type="date" value={date} onChange={e=>setDate(e.target.value)}/><button onClick={load}>{loading?'Cargando...':'Actualizar'}</button></div></div>
-  <SyncStatusCard/><SalesCards daily={data.daily} sync={data.sync}/>
-  <div className="card"><h2>🔎 Buscar ticket</h2><div className="row controls"><input placeholder="Número ticket o CAB_ID" value={search} onChange={e=>setSearch(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')searchTicket()}}/><button onClick={searchTicket}>Buscar</button></div></div>
-  <div className="grid"><div className="card"><h2>Ventas por hora</h2><SalesByHour tickets={tickets}/></div><div className="card"><h2>Últimos tickets</h2><p className="mutedText">Pulsa un ticket para verlo completo y copiarlo por WhatsApp.</p><table><thead><tr><th>Hora</th><th>Ticket</th><th>Pago</th><th>Total</th></tr></thead><tbody>{tickets.slice(-30).reverse().map(t=><tr className="clickable" onClick={()=>setSelected(t)} key={t.id||t.cab_id}><td>{t.hora?new Date(t.hora).toLocaleTimeString('es-ES'):''}</td><td>{t.numdoc||t.cab_id}</td><td>{t.forma_pago||''}</td><td>{money(t.total)}</td></tr>)}</tbody></table></div><div className="card"><h2>Resumen</h2><p>Fecha: <b>{fmtDate(date)}</b></p><p>Tickets cargados: <b>{tickets.length}</b></p><p>Última sincronización: <b>{data.sync?.synced_at?new Date(data.sync.synced_at).toLocaleString('es-ES'):'-'}</b></p>{data.error&&<p className="error">{data.error}</p>}</div></div>
-  {selected&&<TicketDetailModal ticket={selected} onClose={()=>setSelected(null)}/>} 
- </div>}
-
+function TPV(){const[date,setDate]=useState(today());const[data,setData]=useState({daily:null,tickets:[],sync:null,error:null});const[loading,setLoading]=useState(false);const[selected,setSelected]=useState(null);const[loadingTicket,setLoadingTicket]=useState(false);useEffect(()=>{load();const t=setInterval(load,30000);return()=>clearInterval(t)},[date]);async function load(){setLoading(true);const d=await loadSalesForDate(date);setData(d);setLoading(false)}async function openTicket(t){setLoadingTicket(true);const full=await loadTicketFull(t.cab_id,t);setSelected(full);setLoadingTicket(false)}const tickets=data.tickets||[];return <div><div className="card hero"><div><h2>NUMIER LIVE</h2><p>Ventas, tickets y formas de pago desde Colibrí Sync.</p></div><div className="row controls"><button onClick={()=>setDate(today())}>Hoy</button><button onClick={()=>setDate(addDays(today(),-1))}>Ayer</button><button onClick={()=>setDate(addDays(date,-1))}>◀ Día</button><button onClick={()=>setDate(addDays(date,1))}>Día ▶</button><input type="date" value={date} onChange={e=>setDate(e.target.value)}/><button onClick={load}>{loading?'Cargando...':'Actualizar'}</button></div></div><SyncStatusCard/><SalesCards daily={data.daily} sync={data.sync}/><div className="grid"><div className="card"><h2>Ventas por hora</h2><SalesByHour tickets={tickets}/></div><div className="card"><h2>Últimos tickets</h2><p className="mutedText">Pulsa cualquier ticket para verlo completo y copiarlo por WhatsApp.</p><table><thead><tr><th>Hora</th><th>Ticket</th><th>Pago</th><th>Total</th></tr></thead><tbody>{tickets.slice(-30).reverse().map(t=><tr className="clickableRow" onClick={()=>openTicket(t)} key={t.id||t.cab_id}><td>{t.hora?new Date(t.hora).toLocaleTimeString('es-ES'):''}</td><td>{t.numdoc||t.cab_id}</td><td>{t.forma_pago||''}</td><td>{money(t.total)}</td></tr>)}</tbody></table></div><div className="card"><h2>Resumen</h2><p>Fecha: <b>{fmtDate(date)}</b></p><p>Tickets cargados: <b>{tickets.length}</b></p><p>Última sincronización: <b>{data.sync?.synced_at?new Date(data.sync.synced_at).toLocaleString('es-ES'):'-'}</b></p>{data.error&&<p className="error">{data.error}</p>}{loadingTicket&&<p>Cargando ticket...</p>}</div></div>{selected&&<TicketViewer ticket={selected} onClose={()=>setSelected(null)}/>}</div>}
 function Settings(){const[settings,setSettings]=useState(null);useEffect(()=>{supabase?.from('settings').select('*').single().then(({data})=>setSettings(data))},[]);async function save(){const{error}=await supabase.from('settings').upsert(settings);if(error)alert(error.message);else alert('Guardado')}if(!settings)return <div className="card">Cargando...</div>;return <div className="card"><h2>Configuración</h2><label>Latitud<input value={settings.bar_lat} onChange={e=>setSettings({...settings,bar_lat:e.target.value})}/></label><label>Longitud<input value={settings.bar_lng} onChange={e=>setSettings({...settings,bar_lng:e.target.value})}/></label><label>Radio metros<input value={settings.gps_radius_m} onChange={e=>setSettings({...settings,gps_radius_m:e.target.value})}/></label><button onClick={save}>Guardar</button><div className="qrprint"><h3>QR físico del bar</h3><p>Imprime este código y colócalo en zona de personal.</p><img src="/qr_bar_colibri.png"/></div></div>}
 createRoot(document.getElementById('root')).render(<App/>);
