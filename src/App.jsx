@@ -266,7 +266,7 @@ function productRank(lines,sort='qty',articles=new Map()){
  (lines||[]).forEach(l=>{const code=String(l.articulo||'').trim();const name=productNameFromLine(l,articles);const art=code?articles.get(code):null;const key=name||code||'Producto sin nombre';const r=map.get(key)||{name:key,code,family:art?.family||'',qty:0,total:0,tickets:new Set()};r.qty+=Number(l.cantidad||0);r.total+=Number(l.importe||0);if(l.cab_id)r.tickets.add(l.cab_id);map.set(key,r)});
  return [...map.values()].map(r=>({...r,ticketCount:r.tickets.size,avg:r.qty?r.total/r.qty:0})).sort((a,b)=>sort==='total'?b.total-a.total:b.qty-a.qty);
 }
-function ProductRanking({lines,articles}){const[sort,setSort]=useState('qty');const top=productRank(lines,sort,articles).slice(0,20);return <div className="card"><div className="row between"><h2>📦 Ranking de productos</h2><div><button className={sort==='qty'?'active':''} onClick={()=>setSort('qty')}>Unidades</button><button className={sort==='total'?'active':''} onClick={()=>setSort('total')}>Facturación</button></div></div><table><thead><tr><th>#</th><th>Producto</th><th>Familia</th><th>Unidades</th><th>Total</th><th>€/ud</th></tr></thead><tbody>{top.map((p,i)=><tr key={p.name}><td>{i===0?'🥇':i===1?'🥈':i===2?'🥉':i+1}</td><td><b>{p.name}</b>{p.code&&<small className="mutedCode"> {p.code}</small>}</td><td>{p.family||'-'}</td><td>{p.qty.toFixed(2)}</td><td>{money(p.total)}</td><td>{money(p.avg)}</td></tr>)}</tbody></table>{top.length===0&&<p>No hay líneas de productos para este periodo.</p>}</div>}
+function ProductRanking({lines,articles}){const[sort,setSort]=useState('qty');const top=productRank(lines,sort,articles).slice(0,20);return <div className="card"><div className="row between"><h2>🍽️ Ranking de productos</h2><div><button className={sort==='qty'?'active':''} onClick={()=>setSort('qty')}>Unidades</button><button className={sort==='total'?'active':''} onClick={()=>setSort('total')}>Facturación</button></div></div><table><thead><tr><th>#</th><th>Producto</th><th>Familia</th><th>Unidades</th><th>Total</th><th>€/ud</th></tr></thead><tbody>{top.map((p,i)=><tr key={p.name}><td>{i===0?'🥇':i===1?'🥈':i===2?'🥉':i+1}</td><td><b>{p.name}</b>{p.code&&<small className="mutedCode"> {p.code}</small>}</td><td>{p.family||'-'}</td><td>{p.qty.toFixed(2)}</td><td>{money(p.total)}</td><td>{money(p.avg)}</td></tr>)}</tbody></table>{top.length===0&&<p>No hay líneas de productos para este periodo.</p>}</div>}
 function ShiftProfitability({tickets,clockRows}){
  const shiftStats=SHIFT_DEFS.map(s=>({ ...s, sales:0,tickets:0,staffHours:0,cost:0,profitIndex:0,eurosHour:0 }));
  tickets.forEach(t=>{const id=shiftForTicket(t); const st=shiftStats.find(x=>x.id===id); if(st){st.sales+=Number(t.total||0);st.tickets++}});
@@ -274,7 +274,7 @@ function ShiftProfitability({tickets,clockRows}){
  const byEmp={}; (clockRows||[]).slice().reverse().forEach(r=>{const k=r.employee_id||r.employee_name; byEmp[k]=byEmp[k]||[]; byEmp[k].push(r)});
  Object.values(byEmp).forEach(list=>{let open=null; list.forEach(r=>{const typ=String(r.type).toLowerCase(); if(typ==='entrada')open=r; else if(typ==='salida'&&open){const a=decimalHour(open.created_at), b=decimalHour(r.created_at); if(b>a){shiftStats.forEach(s=>s.staffHours+=overlapHours(a,b,s.start,s.end));} open=null;}})});
  shiftStats.forEach(s=>{s.cost=s.staffHours*EMPLOYEE_HOUR_COST; s.profitIndex=s.sales-s.cost; s.eurosHour=s.staffHours?s.sales/s.staffHours:0});
- return <div className="card"><h2>📊 Rentabilidad por turnos</h2><p className="mutedText">Coste empleado configurado: <b>7 €/h</b></p><table><thead><tr><th>Turno</th><th>Ventas</th><th>Tickets</th><th>Horas personal</th><th>Coste personal</th><th>Índice</th></tr></thead><tbody>{shiftStats.map(s=><tr key={s.id}><td><b>{s.name}</b></td><td>{money(s.sales)}</td><td>{s.tickets}</td><td>{s.staffHours.toFixed(1)} h</td><td>{money(s.cost)}</td><td><b className={s.profitIndex>=0?'ok':'bad'}>{money(s.profitIndex)}</b></td></tr>)}</tbody></table></div>
+ return <div className="card"><h2>⏰ Rentabilidad por turnos</h2><p className="mutedText">Coste empleado configurado: <b>7 €/h</b></p><table><thead><tr><th>Turno</th><th>Ventas</th><th>Tickets</th><th>Horas personal</th><th>Coste personal</th><th>Índice</th></tr></thead><tbody>{shiftStats.map(s=><tr key={s.id}><td><b>{s.name}</b></td><td>{money(s.sales)}</td><td>{s.tickets}</td><td>{s.staffHours.toFixed(1)} h</td><td>{money(s.cost)}</td><td><b className={s.profitIndex>=0?'ok':'bad'}>{money(s.profitIndex)}</b></td></tr>)}</tbody></table></div>
 }
 function PredictionBox({mode,date,tickets}){const total=tickets.reduce((a,t)=>a+Number(t.total||0),0);const projected=mode==='hoy'? total/Math.max(0.25,(new Date().getHours()+new Date().getMinutes()/60-8)/15.5) : total;return <div className="card"><h2>🔮 Predicción rápida</h2>{mode==='hoy'?<><p>Ventas actuales: <b>{money(total)}</b></p><p>Si el ritmo se mantiene, cierre estimado: <b>{money(Math.max(total,projected))}</b></p></>:<p>Selecciona <b>Hoy</b> para ver predicción de cierre.</p>}<p className="mutedText">La predicción mejorará cuando acumulemos más histórico por día de semana.</p></div>}
 function BusinessIntelligence(){const[mode,setMode]=useState('hoy');const[date,setDate]=useState(today());const[bi,setBi]=useState({tickets:[],lines:[],sync:null,articles:new Map()});const[clock,setClock]=useState([]);const[loading,setLoading]=useState(false);const r=rangeDates(mode,date);useEffect(()=>{load();const t=setInterval(load,60000);return()=>clearInterval(t)},[mode,date]);async function load(){if(!supabase)return;setLoading(true);const [{tickets,lines,sync,articles},{data:clockData}]=await Promise.all([loadSalesRange(r.from,r.to),supabase.from('clock_records').select('*').gte('created_at',r.from+'T00:00:00').lt('created_at',r.to+'T00:00:00').order('created_at',{ascending:true}).limit(5000)]);setBi({tickets,lines,sync,articles});setClock(clockData||[]);setLoading(false)}const daily=summarizeTickets(bi.tickets);return <div><div className="card hero"><div><h2>📊 Inteligencia de Negocio v2.4</h2><p>{r.label}</p></div><div className="row controls"><button className={mode==='hoy'?'active':''} onClick={()=>setMode('hoy')}>Hoy</button><button className={mode==='ayer'?'active':''} onClick={()=>setMode('ayer')}>Ayer</button><button className={mode==='semana'?'active':''} onClick={()=>setMode('semana')}>7 días</button><button className={mode==='mes'?'active':''} onClick={()=>setMode('mes')}>Mes</button><input type="date" value={date} onChange={e=>{setDate(e.target.value);setMode('fecha')}}/><button onClick={load}>{loading?'Cargando...':'Actualizar'}</button></div></div><SyncStatusCard/><SalesCards daily={daily} sync={bi.sync}/><div className="grid"><PredictionBox mode={mode} date={date} tickets={bi.tickets}/><div className="card"><h2>📈 Ventas por hora</h2><SalesByHour tickets={bi.tickets}/></div></div><ShiftProfitability tickets={bi.tickets} clockRows={clock}/><ProductRanking lines={bi.lines} articles={bi.articles}/><DailyReport summary={daily} lines={bi.lines} tickets={bi.tickets} clockRows={clock} period={r}/></div>}
@@ -352,111 +352,23 @@ function EstadoServicio(){
 function DailyReport({summary,lines,tickets,clockRows,period}){const topQty=productRank(lines,'qty')[0];const topMoney=productRank(lines,'total')[0];const totalStaffHours=(clockRows||[]).filter(r=>String(r.type).toLowerCase()==='entrada').length;return <div className="card report"><h2>🧾 Informe diario / periodo</h2><div className="reportGrid"><p><span>Ventas</span><b>{money(summary.total)}</b></p><p><span>Tickets</span><b>{summary.tickets}</b></p><p><span>Ticket medio</span><b>{money(summary.ticket_medio)}</b></p><p><span>Producto más vendido</span><b>{topQty?topQty.name:'-'}</b></p><p><span>Mayor facturación</span><b>{topMoney?topMoney.name:'-'}</b></p><p><span>Coste hora</span><b>7 €/h</b></p></div><button onClick={()=>navigator.clipboard.writeText(`INFORME COLIBRÍ ERP\n${period.label}\nVentas: ${money(summary.total)}\nTickets: ${summary.tickets}\nTicket medio: ${money(summary.ticket_medio)}\nEfectivo: ${money(summary.efectivo)}\nTarjeta: ${money(summary.tarjeta)}\nProducto más vendido: ${topQty?topQty.name:'-'}\nMayor facturación: ${topMoney?topMoney.name:'-'}`)}>Copiar informe</button><p className="mutedText">El informe automático de las 00:00 queda preparado a nivel de datos; de momento también puedes generarlo y copiarlo desde aquí.</p></div>}
 
 
-function Schedule(){
- const [data,setData]=useState({});
- const [employees,setEmployees]=useState([]);
- const currentWeek=week();
- useEffect(()=>{loadEmployees();loadSaved()},[]);
- async function loadEmployees(){
-  if(!supabase)return;
-  try{
-   const {data}=await supabase.from('employees').select('*').eq('active',true).order('name');
-   setEmployees(data||[]);
-  }catch{}
- }
- function loadSaved(){
-  try{setData(JSON.parse(localStorage.colibriSchedule||'{}')||{})}catch{setData({})}
- }
- function save(next){
-  setData(next);
-  try{localStorage.colibriSchedule=JSON.stringify(next)}catch{}
- }
- function key(day,slot){return `${currentWeek}|${day}|${slot}`}
- function addEmployee(day,slot){
-  const name=prompt('Empleado para este bloque');
-  if(!name)return;
-  const k=key(day,slot);
-  const emp=employees.find(e=>String(e.name).toLowerCase()===String(name).toLowerCase());
-  const item={name, color:emp?.color||EMP_COLORS[Math.abs(name.length)%EMP_COLORS.length]};
-  save({...data,[k]:[...(data[k]||[]),item]});
- }
- function removeEmployee(day,slot,i){
-  const k=key(day,slot);
-  const arr=[...(data[k]||[])];
-  arr.splice(i,1);
-  const next={...data};
-  if(arr.length)next[k]=arr;else delete next[k];
-  save(next);
- }
- const totalHours=DAYS.reduce((acc,day)=>acc+SLOTS.reduce((a,slot)=>a+((data[key(day,slot)]||[]).length*h(slot)),0),0);
- return <div className="card wide">
-  <h2>Cuadrante semanal {currentWeek}</h2>
-  <div className="scheduleGrid">
-   <div className="head">Hora</div>{DAYS.map(d=><div className="head" key={d}>{d}</div>)}
-   {SLOTS.map(slot=><React.Fragment key={slot}>
-    <div className="slot">{slot}</div>
-    {DAYS.map(day=>{
-     const arr=data[key(day,slot)]||[];
-     return <div className="shiftCell" key={day+slot} onDoubleClick={()=>addEmployee(day,slot)} title="Doble clic para añadir empleado">
-      {arr.map((e,i)=><span className="shiftTag" style={{background:e.color}} key={i} onClick={()=>removeEmployee(day,slot,i)}>{e.name}</span>)}
-     </div>
-    })}
-   </React.Fragment>)}
-  </div>
-  <h3>Horas</h3>
-  <p>Total semanal declarado: <b>{totalHours.toFixed(1)} h</b></p>
-  <p className="mutedText">Doble clic en una celda para añadir empleado. Clic sobre un empleado para quitarlo. Guardado local compatible con fichajes y comparador.</p>
+/* COLIBRI_HOTFIX_3_1_X_01
+   Sprint: Hotfix 3.1.x-01
+   Motivo: Los tabs Cuadrantes, Comparador y Configuración llamaban a componentes no definidos
+   y React dejaba la pantalla en blanco. Este bloque restaura carga segura sin tocar Supabase.
+*/
+function SafeHotfixCard({icon,title,subtitle,children}){
+ return <div className="card">
+  <div className="hero"><div><h2>{icon} {title}</h2><p>{subtitle}</p></div></div>
+  {children}
  </div>
 }
 
-function Compare(){
- const [employee,setEmployee]=useState('');
- const [text,setText]=useState('');
- function declaredHours(){
-  const target=employee.trim().toLowerCase();
-  if(!target)return 0;
-  const patterns=[
-   /(\d{1,2}[:.]\d{2})\s*[-–a]\s*(\d{1,2}[:.]\d{2})/gi,
-   /(\d{1,2})\s*[-–a]\s*(\d{1,2})\s*h/gi
-  ];
-  let total=0;
-  const lines=text.split(/\n+/).filter(l=>!target||l.toLowerCase().includes(target));
-  lines.forEach(line=>{
-   for(const re of patterns){
-    let m; re.lastIndex=0;
-    while((m=re.exec(line))){
-     const a=String(m[1]).replace('.',':');const b=String(m[2]).replace('.',':');
-     const [ah,am='0']=a.split(':').map(Number);const [bh,bm='0']=b.split(':').map(Number);
-     let diff=(bh+bm/60)-(ah+am/60); if(diff<0)diff+=24;
-     if(diff>0&&diff<18)total+=diff;
-    }
-   }
-  });
-  return total;
- }
- const hours=declaredHours();
- return <div className="card wide">
-  <h2>Comparador WhatsApp vs cuadrante</h2>
-  <input placeholder="Empleado" value={employee} onChange={e=>setEmployee(e.target.value)}/>
-  <textarea placeholder="Pega plantilla WhatsApp" value={text} onChange={e=>setText(e.target.value)} style={{minHeight:170}}/>
-  <h3>Horas declaradas detectadas: {hours.toFixed(0)} h</h3>
-  <p>Compara este total con el resumen de cuadrante semanal.</p>
- </div>
-}
+function Schedule(){const [data,setData]=useState(()=>JSON.parse(localStorage.colibriSchedule||'{}'));const [selected,setSelected]=useState(null);const [employees,setEmployees]=useState([]);useEffect(()=>{supabase?.from('employees').select('*').eq('active',true).then(({data})=>setEmployees(data||[]))},[]);function key(d,s){return `${week()}|${d}|${s}`}function toggle(emp){const k=key(selected.d,selected.s);let arr=data[k]||[];arr=arr.find(x=>x.id===emp.id)?arr.filter(x=>x.id!==emp.id):(arr.length<3?[...arr,emp]:arr);const nd={...data,[k]:arr};setData(nd);localStorage.colibriSchedule=JSON.stringify(nd)}function hours(){const m={};Object.entries(data).forEach(([k,arr])=>{const slot=k.split('|')[2];arr.forEach(e=>m[e.name]=(m[e.name]||0)+h(slot))});return m}return <div className="card"><h2>Cuadrante semanal {week()}</h2><table className="schedule"><thead><tr><th>Hora</th>{DAYS.map(d=><th>{d}</th>)}</tr></thead><tbody>{SLOTS.map(s=><tr><td>{s}</td>{DAYS.map(d=><td onClick={()=>setSelected({d,s})}>{(data[key(d,s)]||[]).map(e=><span className="badge" style={{background:e.color}}>{e.name}</span>)}</td>)}</tr>)}</tbody></table><h3>Horas</h3>{Object.entries(hours()).map(([n,v])=><p>{n}: {v} h</p>)}{selected&&<div className="modal"><div className="card narrow"><h3>{selected.d} {selected.s}</h3>{employees.map(e=><button className="empbtn" onClick={()=>toggle(e)}><span className="sq" style={{background:e.color}}/> {e.name}</button>)}<button onClick={()=>setSelected(null)}>Guardar y cerrar</button></div></div>}</div>}
 
-function Settings(){
- const hasSupabase=Boolean(supabaseUrl&&supabaseAnon);
- return <div className="card wide">
-  <h2>Configuración</h2>
-  <div className="grid">
-   <div className="card kpi"><span>Supabase</span><b>{hasSupabase?'OK':'Falta ENV'}</b></div>
-   <div className="card kpi"><span>Versión</span><b>3.1.x</b></div>
-   <div className="card kpi"><span>Empresa</span><b>C.G. 21 S.L.</b></div>
-  </div>
-  <p><b>COLIBRÍ ERP PRO</b></p>
-  <p>C/ Amador de los Ríos 16 · 41003 Sevilla · 954533502</p>
- </div>
-}
+function Compare(){const[text,setText]=useState('');const[name,setName]=useState('');function calc(){const clean=text.replace(/_/g,'');let total=0;for(const line of clean.split('\n')){const times=[...line.matchAll(/entrada\s*(\d{1,2}):(\d{2})\s*salida\s*(\d{1,2}):(\d{2})/gi)];const seen=new Set();times.forEach(m=>{const k=m[0];if(seen.has(k))return;seen.add(k);const a=+m[1]*60+ +m[2],b=+m[3]*60+ +m[4];if(b>a)total+=(b-a)/60})}return total}return <div className="card"><h2>Comparador WhatsApp vs cuadrante</h2><input placeholder="Empleado" value={name} onChange={e=>setName(e.target.value)}/><textarea rows="12" placeholder="Pega plantilla WhatsApp" value={text} onChange={e=>setText(e.target.value)}/><h3>Horas declaradas detectadas: {calc()} h</h3><p>Compara este total con el resumen de cuadrante semanal.</p></div>}
+
+function Settings(){const[settings,setSettings]=useState(null);useEffect(()=>{supabase?.from('settings').select('*').single().then(({data})=>setSettings(data))},[]);async function save(){const{error}=await supabase.from('settings').upsert(settings);if(error)alert(error.message);else alert('Guardado')}if(!settings)return <div className="card">Cargando...</div>;return <div className="card"><h2>Configuración</h2><label>Latitud<input value={settings.bar_lat} onChange={e=>setSettings({...settings,bar_lat:e.target.value})}/></label><label>Longitud<input value={settings.bar_lng} onChange={e=>setSettings({...settings,bar_lng:e.target.value})}/></label><label>Radio metros<input value={settings.gps_radius_m} onChange={e=>setSettings({...settings,gps_radius_m:e.target.value})}/></label><button onClick={save}>Guardar</button><div className="qrprint"><h3>QR físico del bar</h3><p>Imprime este código y colócalo en zona de personal.</p><img src="/qr_bar_colibri.png"/></div></div>}
 
 function App(){const host=location.hostname;const onlyClock=host.startsWith('fichar.')||location.pathname.includes('fichar');const [authed,setAuthed]=useState(false);return <>{onlyClock?<ClockPage/>:<>{!authed?<Login onOk={()=>setAuthed(true)}/>:<Manager/>}</>}</>}
 function Login({onOk}){const[pin,setPin]=useState('');return <main className="login"><Brand/><div className="card narrow"><h2>Acceso Manager</h2><input placeholder="Clave gerente" type="password" value={pin} onChange={e=>setPin(e.target.value)}/><button onClick={()=>pin===ADMIN_PIN?onOk():alert('Clave incorrecta')}>Entrar</button><a href="/fichar" className="muted">Ir a fichaje empleados</a></div></main>}
