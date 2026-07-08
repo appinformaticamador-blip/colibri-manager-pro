@@ -81,6 +81,7 @@ const SHIFT_DEFS=[
  {id:'cena',name:'🌙 Cena',start:20,end:23.5}
 ];
 const EMPLOYEE_HOUR_COST=7;
+const SMART_GROWTH_TARGET=0.10; // Objetivo inteligente: +10% sobre histórico comparable
 function decimalHour(dt){const d=new Date(dt);return d.getHours()+d.getMinutes()/60}
 function overlapHours(a1,a2,b1,b2){return Math.max(0,Math.min(a2,b2)-Math.max(a1,b1))}
 function shiftForTicket(t){const hh=decimalHour(t.hora||t.created_at);return SHIFT_DEFS.find(s=>hh>=s.start&&hh<s.end)?.id||'otros'}
@@ -91,20 +92,46 @@ function rangeDates(mode,date){
  if(mode==='mes'){const d=new Date();const f=new Date(d.getFullYear(),d.getMonth(),1).toISOString().slice(0,10);return {from:f,to:addDays(today(),1),label:'Mes actual'}};
  return {from:date,to:addDays(date,1),label:fmtDate(date)};
 }
+async function loadArticlesMap(){
+ if(!supabase)return new Map();
+ const {data}=await supabase.from('numier_articles').select('article_code,article_name,family,category_name').limit(20000);
+ const map=new Map();
+ (data||[]).forEach(a=>{const code=String(a.article_code||'').trim();if(code)map.set(code,{name:a.article_name||code,family:a.family||a.category_name||''});});
+ return map;
+}
+async function loadSmartGoal(date,currentTotal=0){
+ if(!supabase)return {goal:750,base:0,projected:currentTotal,source:'objetivo base',message:'Objetivo base configurado'};
+ const target=new Date(date+'T12:00:00');
+ const from=new Date(target); from.setDate(from.getDate()-420);
+ const {data}=await supabase.from('numier_daily_sales').select('fecha,total,tickets,ticket_medio').gte('fecha',from.toISOString().slice(0,10)).lt('fecha',date).order('fecha',{ascending:false}).limit(500);
+ const rows=(data||[]).filter(r=>Number(r.total||0)>0);
+ const sameWeekday=rows.filter(r=>new Date(r.fecha+'T12:00:00').getDay()===target.getDay()).slice(0,12);
+ const avgSame=sameWeekday.length?sameWeekday.reduce((a,r)=>a+Number(r.total||0),0)/sameWeekday.length:0;
+ const ly=new Date(target); ly.setFullYear(ly.getFullYear()-1); const lyStart=new Date(ly); lyStart.setDate(lyStart.getDate()-14); const lyEnd=new Date(ly); lyEnd.setDate(lyEnd.getDate()+14);
+ const sameLastYear=rows.filter(r=>{const d=new Date(r.fecha+'T12:00:00');return d>=lyStart&&d<=lyEnd&&d.getDay()===target.getDay();});
+ const avgYear=sameLastYear.length?sameLastYear.reduce((a,r)=>a+Number(r.total||0),0)/sameLastYear.length:0;
+ let base=0,source='';
+ if(avgYear>0&&avgSame>0){base=(avgYear*0.6)+(avgSame*0.4);source='año anterior + últimos mismos días';}
+ else if(avgSame>0){base=avgSame;source='últimos mismos días de la semana';}
+ else {base=750/1.10;source='objetivo base';}
+ const goal=Math.round(base*(1+SMART_GROWTH_TARGET));
+ let elapsed=1;if(date===today()){const now=new Date();const hour=now.getHours()+now.getMinutes()/60;elapsed=Math.max(0.08,Math.min(1,(hour-8)/(23.5-8)));}
+ const projected=date===today()?Math.max(currentTotal,currentTotal/elapsed):currentTotal;
+ const diff=currentTotal-goal;
+ const message=currentTotal>=goal?`Objetivo IA superado en ${money(diff)}.`:`Faltan ${money(Math.abs(diff))} para alcanzar el objetivo IA de hoy.`;
+ return {goal,base,projected,source,message,avgSame,avgYear,growth:SMART_GROWTH_TARGET};
+}
 async function loadSalesRange(from,to){
- if(!supabase)return {tickets:[],lines:[],sync:null};
+ if(!supabase)return {tickets:[],lines:[],sync:null,articles:new Map()};
  const start=from+'T00:00:00'; const end=to+'T00:00:00';
- const [{data:ticketsData},{data:syncData}]=await Promise.all([
+ const [{data:ticketsData},{data:syncData},articles]=await Promise.all([
   supabase.from('numier_tickets').select('*').gte('hora',start).lt('hora',end).order('hora',{ascending:true}).limit(10000),
-  supabase.from('numier_sync_files').select('*').order('synced_at',{ascending:false}).limit(1)
+  supabase.from('numier_sync_files').select('*').order('synced_at',{ascending:false}).limit(1),
+  loadArticlesMap()
  ]);
  const tickets=ticketsData||[]; const cabIds=tickets.map(t=>t.cab_id).filter(Boolean); let lines=[];
- for(let i=0;i<cabIds.length;i+=200){
-  const chunk=cabIds.slice(i,i+200);
-  const {data}=await supabase.from('numier_ticket_lines').select('*').in('cab_id',chunk).limit(10000);
-  if(data) lines=lines.concat(data);
- }
- return {tickets,lines,sync:syncData?.[0]||null};
+ for(let i=0;i<cabIds.length;i+=200){const chunk=cabIds.slice(i,i+200);const {data}=await supabase.from('numier_ticket_lines').select('*').in('cab_id',chunk).limit(10000);if(data)lines=lines.concat(data);}
+ return {tickets,lines,sync:syncData?.[0]||null,articles};
 }
 function summarizeTickets(tickets){
  const total=tickets.reduce((a,t)=>a+Number(t.total||0),0);
@@ -113,12 +140,17 @@ function summarizeTickets(tickets){
  const cheque=tickets.reduce((a,t)=>a+Number(t.cheque||0),0);
  return {total,tickets:tickets.length,ticket_medio:tickets.length?total/tickets.length:0,efectivo,tarjeta,cheque};
 }
-function productRank(lines,sort='qty'){
+function productNameFromLine(l,articles){
+ const code=String(l.articulo||'').trim(); const fallback=(l.descripcion||l.articulo||'Producto sin nombre').trim();
+ if(code&&articles?.get?.(code)?.name)return articles.get(code).name;
+ return fallback;
+}
+function productRank(lines,sort='qty',articles=new Map()){
  const map=new Map();
- (lines||[]).forEach(l=>{const name=(l.descripcion||l.articulo||'Producto sin nombre').trim(); const r=map.get(name)||{name,qty:0,total:0,tickets:new Set()}; r.qty+=Number(l.cantidad||0); r.total+=Number(l.importe||0); if(l.cab_id)r.tickets.add(l.cab_id); map.set(name,r)});
+ (lines||[]).forEach(l=>{const code=String(l.articulo||'').trim();const name=productNameFromLine(l,articles);const art=code?articles.get(code):null;const key=name||code||'Producto sin nombre';const r=map.get(key)||{name:key,code,family:art?.family||'',qty:0,total:0,tickets:new Set()};r.qty+=Number(l.cantidad||0);r.total+=Number(l.importe||0);if(l.cab_id)r.tickets.add(l.cab_id);map.set(key,r)});
  return [...map.values()].map(r=>({...r,ticketCount:r.tickets.size,avg:r.qty?r.total/r.qty:0})).sort((a,b)=>sort==='total'?b.total-a.total:b.qty-a.qty);
 }
-function ProductRanking({lines}){const[sort,setSort]=useState('qty');const top=productRank(lines,sort).slice(0,20);return <div className="card"><div className="row between"><h2>🍽️ Ranking de productos</h2><div><button className={sort==='qty'?'active':''} onClick={()=>setSort('qty')}>Unidades</button><button className={sort==='total'?'active':''} onClick={()=>setSort('total')}>Facturación</button></div></div><table><thead><tr><th>#</th><th>Producto</th><th>Unidades</th><th>Total</th><th>€/ud</th></tr></thead><tbody>{top.map((p,i)=><tr key={p.name}><td>{i===0?'🥇':i===1?'🥈':i===2?'🥉':i+1}</td><td><b>{p.name}</b></td><td>{p.qty.toFixed(2)}</td><td>{money(p.total)}</td><td>{money(p.avg)}</td></tr>)}</tbody></table>{top.length===0&&<p>No hay líneas de productos para este periodo.</p>}</div>}
+function ProductRanking({lines,articles}){const[sort,setSort]=useState('qty');const top=productRank(lines,sort,articles).slice(0,20);return <div className="card"><div className="row between"><h2>🍽️ Ranking de productos</h2><div><button className={sort==='qty'?'active':''} onClick={()=>setSort('qty')}>Unidades</button><button className={sort==='total'?'active':''} onClick={()=>setSort('total')}>Facturación</button></div></div><table><thead><tr><th>#</th><th>Producto</th><th>Familia</th><th>Unidades</th><th>Total</th><th>€/ud</th></tr></thead><tbody>{top.map((p,i)=><tr key={p.name}><td>{i===0?'🥇':i===1?'🥈':i===2?'🥉':i+1}</td><td><b>{p.name}</b>{p.code&&<small className="mutedCode"> {p.code}</small>}</td><td>{p.family||'-'}</td><td>{p.qty.toFixed(2)}</td><td>{money(p.total)}</td><td>{money(p.avg)}</td></tr>)}</tbody></table>{top.length===0&&<p>No hay líneas de productos para este periodo.</p>}</div>}
 function ShiftProfitability({tickets,clockRows}){
  const shiftStats=SHIFT_DEFS.map(s=>({ ...s, sales:0,tickets:0,staffHours:0,cost:0,profitIndex:0,eurosHour:0 }));
  tickets.forEach(t=>{const id=shiftForTicket(t); const st=shiftStats.find(x=>x.id===id); if(st){st.sales+=Number(t.total||0);st.tickets++}});
@@ -129,7 +161,7 @@ function ShiftProfitability({tickets,clockRows}){
  return <div className="card"><h2>⏰ Rentabilidad por turnos</h2><p className="mutedText">Coste empleado configurado: <b>7 €/h</b></p><table><thead><tr><th>Turno</th><th>Ventas</th><th>Tickets</th><th>Horas personal</th><th>Coste personal</th><th>Índice</th></tr></thead><tbody>{shiftStats.map(s=><tr key={s.id}><td><b>{s.name}</b></td><td>{money(s.sales)}</td><td>{s.tickets}</td><td>{s.staffHours.toFixed(1)} h</td><td>{money(s.cost)}</td><td><b className={s.profitIndex>=0?'ok':'bad'}>{money(s.profitIndex)}</b></td></tr>)}</tbody></table></div>
 }
 function PredictionBox({mode,date,tickets}){const total=tickets.reduce((a,t)=>a+Number(t.total||0),0);const projected=mode==='hoy'? total/Math.max(0.25,(new Date().getHours()+new Date().getMinutes()/60-8)/15.5) : total;return <div className="card"><h2>🔮 Predicción rápida</h2>{mode==='hoy'?<><p>Ventas actuales: <b>{money(total)}</b></p><p>Si el ritmo se mantiene, cierre estimado: <b>{money(Math.max(total,projected))}</b></p></>:<p>Selecciona <b>Hoy</b> para ver predicción de cierre.</p>}<p className="mutedText">La predicción mejorará cuando acumulemos más histórico por día de semana.</p></div>}
-function BusinessIntelligence(){const[mode,setMode]=useState('hoy');const[date,setDate]=useState(today());const[bi,setBi]=useState({tickets:[],lines:[],sync:null});const[clock,setClock]=useState([]);const[loading,setLoading]=useState(false);const r=rangeDates(mode,date);useEffect(()=>{load();const t=setInterval(load,60000);return()=>clearInterval(t)},[mode,date]);async function load(){if(!supabase)return;setLoading(true);const [{tickets,lines,sync},{data:clockData}]=await Promise.all([loadSalesRange(r.from,r.to),supabase.from('clock_records').select('*').gte('created_at',r.from+'T00:00:00').lt('created_at',r.to+'T00:00:00').order('created_at',{ascending:true}).limit(5000)]);setBi({tickets,lines,sync});setClock(clockData||[]);setLoading(false)}const daily=summarizeTickets(bi.tickets);return <div><div className="card hero"><div><h2>📊 Inteligencia de Negocio v2.4</h2><p>{r.label}</p></div><div className="row controls"><button className={mode==='hoy'?'active':''} onClick={()=>setMode('hoy')}>Hoy</button><button className={mode==='ayer'?'active':''} onClick={()=>setMode('ayer')}>Ayer</button><button className={mode==='semana'?'active':''} onClick={()=>setMode('semana')}>7 días</button><button className={mode==='mes'?'active':''} onClick={()=>setMode('mes')}>Mes</button><input type="date" value={date} onChange={e=>{setDate(e.target.value);setMode('fecha')}}/><button onClick={load}>{loading?'Cargando...':'Actualizar'}</button></div></div><SyncStatusCard/><SalesCards daily={daily} sync={bi.sync}/><div className="grid"><PredictionBox mode={mode} date={date} tickets={bi.tickets}/><div className="card"><h2>📈 Ventas por hora</h2><SalesByHour tickets={bi.tickets}/></div></div><ShiftProfitability tickets={bi.tickets} clockRows={clock}/><ProductRanking lines={bi.lines}/><DailyReport summary={daily} lines={bi.lines} tickets={bi.tickets} clockRows={clock} period={r}/></div>}
+function BusinessIntelligence(){const[mode,setMode]=useState('hoy');const[date,setDate]=useState(today());const[bi,setBi]=useState({tickets:[],lines:[],sync:null,articles:new Map()});const[clock,setClock]=useState([]);const[loading,setLoading]=useState(false);const r=rangeDates(mode,date);useEffect(()=>{load();const t=setInterval(load,60000);return()=>clearInterval(t)},[mode,date]);async function load(){if(!supabase)return;setLoading(true);const [{tickets,lines,sync,articles},{data:clockData}]=await Promise.all([loadSalesRange(r.from,r.to),supabase.from('clock_records').select('*').gte('created_at',r.from+'T00:00:00').lt('created_at',r.to+'T00:00:00').order('created_at',{ascending:true}).limit(5000)]);setBi({tickets,lines,sync,articles});setClock(clockData||[]);setLoading(false)}const daily=summarizeTickets(bi.tickets);return <div><div className="card hero"><div><h2>📊 Inteligencia de Negocio v2.4</h2><p>{r.label}</p></div><div className="row controls"><button className={mode==='hoy'?'active':''} onClick={()=>setMode('hoy')}>Hoy</button><button className={mode==='ayer'?'active':''} onClick={()=>setMode('ayer')}>Ayer</button><button className={mode==='semana'?'active':''} onClick={()=>setMode('semana')}>7 días</button><button className={mode==='mes'?'active':''} onClick={()=>setMode('mes')}>Mes</button><input type="date" value={date} onChange={e=>{setDate(e.target.value);setMode('fecha')}}/><button onClick={load}>{loading?'Cargando...':'Actualizar'}</button></div></div><SyncStatusCard/><SalesCards daily={daily} sync={bi.sync}/><div className="grid"><PredictionBox mode={mode} date={date} tickets={bi.tickets}/><div className="card"><h2>📈 Ventas por hora</h2><SalesByHour tickets={bi.tickets}/></div></div><ShiftProfitability tickets={bi.tickets} clockRows={clock}/><ProductRanking lines={bi.lines} articles={bi.articles}/><DailyReport summary={daily} lines={bi.lines} tickets={bi.tickets} clockRows={clock} period={r}/></div>}
 function DailyReport({summary,lines,tickets,clockRows,period}){const topQty=productRank(lines,'qty')[0];const topMoney=productRank(lines,'total')[0];const totalStaffHours=(clockRows||[]).filter(r=>String(r.type).toLowerCase()==='entrada').length;return <div className="card report"><h2>🧾 Informe diario / periodo</h2><div className="reportGrid"><p><span>Ventas</span><b>{money(summary.total)}</b></p><p><span>Tickets</span><b>{summary.tickets}</b></p><p><span>Ticket medio</span><b>{money(summary.ticket_medio)}</b></p><p><span>Producto más vendido</span><b>{topQty?topQty.name:'-'}</b></p><p><span>Mayor facturación</span><b>{topMoney?topMoney.name:'-'}</b></p><p><span>Coste hora</span><b>7 €/h</b></p></div><button onClick={()=>navigator.clipboard.writeText(`INFORME COLIBRÍ ERP\n${period.label}\nVentas: ${money(summary.total)}\nTickets: ${summary.tickets}\nTicket medio: ${money(summary.ticket_medio)}\nEfectivo: ${money(summary.efectivo)}\nTarjeta: ${money(summary.tarjeta)}\nProducto más vendido: ${topQty?topQty.name:'-'}\nMayor facturación: ${topMoney?topMoney.name:'-'}`)}>Copiar informe</button><p className="mutedText">El informe automático de las 00:00 queda preparado a nivel de datos; de momento también puedes generarlo y copiarlo desde aquí.</p></div>}
 
 
@@ -159,8 +191,7 @@ function buildDashboardTimeline(tickets,clockRows,daily,objective){
 function workingFromClock(rows){const latest=new Map();(rows||[]).forEach(r=>{const k=r.employee_id||r.employee_name;if(!latest.has(k))latest.set(k,r)});return [...latest.values()].filter(r=>String(r.type).toLowerCase()==='entrada')}
 function Dashboard(){
  const[date,setDate]=useState(today());
- const[state,setState]=useState({tickets:[],lines:[],clock:[],sync:null,syncStatus:null,prev:null,avgSameDay:null,loading:true,error:null});
- const objective=4000;
+ const[state,setState]=useState({tickets:[],lines:[],articles:new Map(),clock:[],sync:null,syncStatus:null,prev:null,avgSameDay:null,goal:null,loading:true,error:null});
  useEffect(()=>{load();const t=setInterval(load,15000);return()=>clearInterval(t)},[date]);
  async function load(){
   if(!supabase){setState(s=>({...s,error:'Supabase no configurado',loading:false}));return}
@@ -175,43 +206,37 @@ function Dashboard(){
     loadSalesForDate(prevDate),
     ...sameDays.map(d=>loadSalesForDate(d))
    ]);
+   const summary=summarizeTickets(rangeData.tickets||[]);
+   const smart=await loadSmartGoal(date,summary.total);
    const avgTotals=avgData.map(x=>Number(x?.daily?.total||0)).filter(v=>v>0);
    const avgSameDay=avgTotals.length?avgTotals.reduce((a,b)=>a+b,0)/avgTotals.length:0;
-   setState({tickets:rangeData.tickets||[],lines:rangeData.lines||[],clock:clockRes.data||[],sync:rangeData.sync||null,syncStatus,prev:prevData.daily||null,avgSameDay,loading:false,error:null});
+   setState({tickets:rangeData.tickets||[],lines:rangeData.lines||[],articles:rangeData.articles||new Map(),clock:clockRes.data||[],sync:rangeData.sync||null,syncStatus,prev:prevData.daily||null,avgSameDay,goal:smart,loading:false,error:null});
   }catch(e){setState(s=>({...s,loading:false,error:e.message||String(e)}))}
  }
  const summary=summarizeTickets(state.tickets);
  const working=workingFromClock(state.clock);
+ const objective=Number(state.goal?.goal||750);
  const progress=Math.min(100,objective?summary.total/objective*100:0);
- const hoursPassed=Math.max(.25,(new Date().getHours()+new Date().getMinutes()/60-8));
- const projected=date===today()?Math.max(summary.total,(summary.total/Math.max(.25,hoursPassed))*15.5):summary.total;
+ const projected=Number(state.goal?.projected||summary.total);
  const vsPrev=pctDiff(summary.total,state.prev?.total);
  const vsAvg=pctDiff(summary.total,state.avgSameDay);
  const syncPct=Number(state.syncStatus?.progress_percent||0);
- const live=syncPct>=100||String(state.syncStatus?.mode||'').toUpperCase().includes('LIVE');
- const insight=state.error?`Hay un problema de conexión: ${state.error}`:summary.total===0?'Todavía no hay ventas cargadas para este día. Si el Sync está al 100%, revisa que la fecha seleccionada tenga tickets.':date===today()?`Ahora llevas ${money(summary.total)}. La previsión de cierre es ${money(projected)}. Vas ${vsAvg!=null?formatPct(vsAvg):'sin histórico suficiente'} respecto a la media de días similares.`:`Este día cerró con ${money(summary.total)}, ${summary.tickets} tickets y ticket medio de ${money(summary.ticket_medio)}.`;
+ const live=syncPct>=100||String(state.syncStatus?.mode||'').includes('LIVE');
+ const topProducts=productRank(state.lines,'qty',state.articles).slice(0,5);
  const timeline=buildDashboardTimeline(state.tickets,state.clock,summary,objective);
- const top=productRank(state.lines,'qty').slice(0,5);
+ const statusColor=progress>=100?'🟢':progress>=75?'🟡':'🔴';
+ const aiText=progress>=100?`Objetivo inteligente conseguido. Has superado los ${money(objective)} previstos para hoy.`:`Objetivo inteligente: ${money(objective)}. ${state.goal?.message||''} Previsión de cierre: ${money(projected)}.`;
  return <div className="commandCenter">
-  <div className="proHero">
-   <div><span className="pill">Colibrí ERP PRO 3.0 · Beta</span><h1>{getGreeting()}, Alfonso</h1><p>{fmtDate(date)} · Centro de mando conectado a Supabase</p></div>
-   <div className={'liveBadge '+(live?'okLive':'warnLive')}><b>{live?'🟢 ERP LIVE':'🟡 SINCRONIZANDO'}</b><span>{state.syncStatus?.updated_at?secondsAgo(state.syncStatus.updated_at):'sin estado'}</span></div>
-  </div>
-  <div className="card syncStatusCard"><div className="row between"><div><h2>{live?'ACTUALIZADO 100%':'SINCRONIZANDO'}</h2><p>{state.syncStatus?.message||'Estado de Colibrí Engine'}</p></div><div className="syncPctDark">{Math.max(0,Math.min(100,syncPct)).toFixed(1)}%</div></div><div className="progress light"><i style={{width:`${Math.max(0,Math.min(100,syncPct))}%`}}></i></div><div className="syncMini"><span>Procesados <b>{Number(state.syncStatus?.processed_tickets||0).toLocaleString('es-ES')}</b></span><span>Total <b>{Number(state.syncStatus?.total_tickets||0).toLocaleString('es-ES')}</b></span><span>Último CAB_ID <b>{Number(state.syncStatus?.last_cab_id||0).toLocaleString('es-ES')}</b></span></div></div>
-  <div className="kpiDeck">
-   <div className="proKpi main"><span>Ventas hoy</span><b>{money(summary.total)}</b><em>{progress.toFixed(0)}% del objetivo {money(objective)}</em></div>
-   <div className="proKpi"><span>Predicción IA</span><b>{money(projected)}</b><em>cierre estimado</em></div>
-   <div className="proKpi"><span>Tickets</span><b>{summary.tickets}</b><em>{money(summary.ticket_medio)} ticket medio</em></div>
-   <div className="proKpi"><span>Comparativa</span><b>{formatPct(vsPrev)}</b><em>vs. semana anterior</em></div>
-   <div className="proKpi"><span>Media días similares</span><b>{formatPct(vsAvg)}</b><em>últimos 4 mismos días</em></div>
-   <div className="proKpi"><span>Personal</span><b>{working.length}</b><em>trabajando ahora</em></div>
-  </div>
-  <div className="card aiCard"><h2>🎯 Qué deberías saber ahora</h2><p>{insight}</p>{working.length>0&&<p className="miniLine">En turno ahora: {working.map(w=>w.employee_name).join(', ')}</p>}</div>
-  <div className="grid proGrid"><div className="card"><h2>📈 Ventas por hora</h2><SalesByHour tickets={state.tickets}/></div><ShiftProfitability tickets={state.tickets} clockRows={state.clock}/></div>
-  <div className="grid proGrid"><div className="card"><h2>🏆 Productos TOP</h2>{top.length?top.map((p,i)=><div className="topProduct" key={p.name}><b>{i===0?'🥇':i===1?'🥈':i===2?'🥉':i+1}</b><span>{p.name}</span><em>{p.qty.toFixed(0)} uds · {money(p.total)}</em></div>):<p>No hay líneas de productos para este día.</p>}<p className="mutedText">En el siguiente sprint cruzaremos con articulos.DBF para mostrar nombres reales cuando NUMIER solo mande códigos.</p></div><div className="card"><h2>🕒 Timeline del día</h2>{timeline.length?timeline.map((e,i)=><div className="timelineItem" key={i}><b>{safeHour(e.time)}</b><span>{e.icon}</span><p>{e.text}</p></div>):<p>Aún no hay eventos para este día.</p>}</div></div>
-  <div className="card"><h2>🚨 Alertas inteligentes</h2>{state.error?<p className="alertBad">🔴 {state.error}</p>:<p className="alertOk">🟢 Sin alertas críticas. No se avisará por periodos sin tickets.</p>}<p className="mutedText">Próximo sprint: alerta por empleado con turno asignado que no ficha dentro del margen configurado.</p></div>
-  <div className="card hero"><div><h2>Fecha de análisis</h2><p>Cambia de día sin tocar producción.</p></div><div className="row controls"><button onClick={()=>setDate(today())}>Hoy</button><button onClick={()=>setDate(addDays(today(),-1))}>Ayer</button><button onClick={()=>setDate(addDays(date,-1))}>◀ Día</button><button onClick={()=>setDate(addDays(date,1))}>Día ▶</button><input type="date" value={date} onChange={e=>setDate(e.target.value)}/><button onClick={load}>{state.loading?'Cargando...':'Actualizar'}</button></div></div>
+  <div className="proHero"><div><span className="pill">Colibrí ERP PRO 3.0 · Beta</span><h1>{getGreeting()}, Alfonso</h1><p>{fmtDate(date)} · Centro de mando conectado a Supabase</p></div><div className="liveBox"><b>{live?'🟢 ERP LIVE':'🟡 Sincronizando'}</b><span>{secondsAgo(state.syncStatus?.updated_at||state.sync?.synced_at)}</span></div></div>
+  {state.error&&<div className="card error">{state.error}</div>}
+  <SyncStatusCard/>
+  <div className="proGrid"><div className="proKpi"><span>Ventas hoy</span><b>{money(summary.total)}</b><em>{formatPct(vsPrev)} vs semana pasada</em></div><div className="proKpi"><span>Objetivo IA +10%</span><b>{money(objective)}</b><em>{progress.toFixed(1)}% conseguido</em></div><div className="proKpi"><span>Predicción cierre</span><b>{money(projected)}</b><em>{projected>=objective?'por encima':'por debajo'} del objetivo</em></div><div className="proKpi"><span>Tickets</span><b>{summary.tickets}</b><em>{money(summary.ticket_medio)} ticket medio</em></div><div className="proKpi"><span>Personal</span><b>{working.length}</b><em>trabajando ahora</em></div></div>
+  <div className="card objectiveCard"><div className="row between"><h2>{statusColor} Objetivo inteligente</h2><b>{progress.toFixed(1)}%</b></div><div className="progress"><i style={{width:`${progress}%`}}></i></div><p>{aiText}</p><p className="mutedText">Crecimiento objetivo aplicado: +10% sobre histórico comparable.</p></div>
+  <div className="grid"><div className="card"><h2>🧠 Qué deberías saber ahora</h2><p>{aiText}</p><p>Media últimos días similares: <b>{state.avgSameDay?money(state.avgSameDay):'-'}</b></p></div><div className="card"><h2>📈 Ventas por hora</h2><SalesByHour tickets={state.tickets}/></div><div className="card"><h2>👥 Trabajando ahora</h2><div className="big">{working.length}</div>{working.map(w=><p key={w.id}>🟢 {w.employee_name}</p>)}</div></div>
+  <div className="grid"><div className="card"><h2>🥇 Productos TOP</h2>{topProducts.length?topProducts.map((p,i)=><p key={p.name}>{i===0?'🥇':i===1?'🥈':i===2?'🥉':i+1} <b>{p.name}</b> · {p.qty.toFixed(0)} uds · {money(p.total)}</p>):<p>Sin productos en el periodo.</p>}</div><div className="card"><h2>🕒 Timeline del día</h2>{timeline.length?timeline.map((e,i)=><p key={i}><b>{safeHour(e.time)}</b> {e.icon} {e.text}</p>):<p>Aún sin eventos suficientes.</p>}</div></div>
+  <ProductRanking lines={state.lines} articles={state.articles}/>
  </div>}
+
 function Employees(){const[employees,setEmployees]=useState([]);const[name,setName]=useState('');const[pin,setPin]=useState('');useEffect(()=>{load()},[]);async function load(){if(!supabase)return;const{data}=await supabase.from('employees').select('*').order('name');setEmployees(data||[])}async function add(){if(!name||!pin)return alert('Nombre y PIN');const color=EMP_COLORS[employees.length%EMP_COLORS.length];const{error}=await supabase.from('employees').insert({name,pin,role:'empleado',color,can_clock:true,active:true});if(error)alert(error.message);setName('');setPin('');load()}async function update(e,patch){const{error}=await supabase.from('employees').update(patch).eq('id',e.id);if(error)alert(error.message);load()}return <div className="card"><h2>Empleados</h2><div className="row"><input placeholder="Nuevo empleado" value={name} onChange={e=>setName(e.target.value)}/><input placeholder="PIN" value={pin} onChange={e=>setPin(e.target.value)}/><button onClick={add}>Añadir</button></div>{employees.map(e=><div className="employee" key={e.id}><span className="sq" style={{background:e.color}}></span><b>{e.name}</b><span>{e.active?'Activo':'Inactivo'}</span><input placeholder="Nuevo PIN" onBlur={ev=>ev.target.value&&update(e,{pin:ev.target.value})}/><button onClick={()=>update(e,{active:!e.active})}>{e.active?'Desactivar':'Activar'}</button></div>)}</div>}
 function ClockPage(){const[employees,setEmployees]=useState([]);const[emp,setEmp]=useState('');const[pin,setPin]=useState('');const[note,setNote]=useState('');const[msg,setMsg]=useState('');const[qr,setQr]=useState(false);useEffect(()=>{load()},[]);async function load(){if(!supabase){setMsg('Supabase no configurado');return}const{data}=await supabase.from('employees').select('name').eq('active',true).eq('can_clock',true).order('name');setEmployees(data||[])}async function clock(type,method='gps'){if(!supabase)return setMsg('Supabase no configurado');setMsg('Comprobando...');let coords=null;if(method==='gps'){try{coords=await new Promise((res,rej)=>navigator.geolocation.getCurrentPosition(res,rej,{enableHighAccuracy:true,timeout:15000,maximumAge:0}));}catch(e){setQr(true);return setMsg('GPS no disponible. Usa el QR del bar.')}}const payload={p_employee_name:emp,p_pin:pin,p_type:type,p_note:note,p_gps_lat:coords?.coords?.latitude||null,p_gps_lng:coords?.coords?.longitude||null,p_accuracy:coords?.coords?.accuracy||null,p_method:method};const{data,error}=await supabase.rpc('registrar_fichaje_v2',payload);if(error)return setMsg('❌ '+error.message);setMsg((data?.ok?'✅ ':'❌ ')+(data?.message||'Respuesta recibida')+(data?.distance_m?` · Distancia ${Math.round(data.distance_m)} m`:''));if(!data?.ok&&data?.outside_radius)setQr(true)}return <main className="login"><Brand/><div className="card narrow"><h2>Fichaje empleados</h2><select value={emp} onChange={e=>setEmp(e.target.value)}><option value="">Empleado</option>{employees.map(e=><option key={e.name}>{e.name}</option>)}</select><input placeholder="PIN" type="password" value={pin} onChange={e=>setPin(e.target.value)}/><textarea placeholder="Observaciones" value={note} onChange={e=>setNote(e.target.value)}/><div className="row"><button onClick={()=>clock('entrada')}>Entrada GPS</button><button className="red" onClick={()=>clock('salida')}>Salida GPS</button></div>{qr&&<div className="qrbox"><p>Escanea/usa QR físico del bar como respaldo.</p><button onClick={()=>clock('entrada','qr')}>Entrada QR</button><button className="red" onClick={()=>clock('salida','qr')}>Salida QR</button></div>}<p className="msg">{msg}</p></div></main>}
 function ClockPanel(){const[rows,setRows]=useState([]);const[open,setOpen]=useState([]);useEffect(()=>{load()},[]);async function load(){if(!supabase)return;const{data,error}=await supabase.from('clock_records').select('*').order('created_at',{ascending:false}).limit(500);if(error){alert(error.message);return}const list=data||[];setRows(list);const latest=new Map();list.forEach(r=>{if(!latest.has(r.employee_id||r.employee_name))latest.set(r.employee_id||r.employee_name,r)});setOpen([...latest.values()].filter(r=>r.type==='entrada'))}async function closeManual(r){const now=new Date();const suggested=now.toISOString().slice(0,16);const value=prompt(`Hora de salida real para ${r.employee_name} (formato YYYY-MM-DDTHH:mm)`,suggested);if(!value)return;const reason=prompt('Motivo del cierre manual','Olvido de fichaje')||'Cierre manual por manager';const exitIso=new Date(value).toISOString();const {error}=await supabase.from('clock_records').insert({employee_id:r.employee_id,employee_name:r.employee_name,type:'salida',method:'manual',inside_radius:true,note:`SALIDA MANUAL POR MANAGER · ${reason}`,created_at:exitIso});if(error){alert(error.message);return}alert('Turno cerrado manualmente');load()}return <div className="grid"><div className="card"><h2>Fichajes abiertos</h2><button onClick={load}>Actualizar</button>{open.length===0&&<p>✅ No hay turnos abiertos.</p>}{open.map(r=><div className="employee" key={r.id}><b>{r.employee_name}</b><span>Entrada: {new Date(r.created_at).toLocaleString()}</span><span>{Math.max(0,((Date.now()-new Date(r.created_at))/3600000)).toFixed(1)} h abierto</span><button className="red" onClick={()=>closeManual(r)}>Cerrar turno</button></div>)}</div><div className="card"><h2>Historial de fichajes</h2><table><tbody>{rows.slice(0,120).map(r=><tr key={r.id}><td>{new Date(r.created_at).toLocaleString()}</td><td>{r.employee_name}</td><td>{r.type}</td><td>{r.method}</td><td>{r.note||''}</td><td>{r.distance_m?Math.round(r.distance_m)+' m':''}</td></tr>)}</tbody></table></div></div>}
