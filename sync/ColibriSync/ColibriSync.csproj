@@ -6,13 +6,13 @@
     <Nullable>enable</Nullable>
     <AssemblyName>ColibriEngine</AssemblyName>
     <RootNamespace>ColibriSync</RootNamespace>
-    <Version>3.0.2</Version>
-    <FileVersion>3.0.2.0</FileVersion>
-    <AssemblyVersion>3.0.2.0</AssemblyVersion>
+    <Version>3.0.4</Version>
+    <FileVersion>3.0.4.0</FileVersion>
+    <AssemblyVersion>3.0.4.0</AssemblyVersion>
     <Authors>C.G. 21 S.L.</Authors>
     <Company>C.G. 21 S.L.</Company>
     <Product>Colibrí Engine</Product>
-    <Description>Colibrí Engine 3.0.2 - NUMIER LIVE + Estado del Servicio</Description>
+    <Description>Colibrí Engine 3.0.4 - NUMIER LIVE + Estado del Servicio</Description>
     <InvariantGlobalization>false</InvariantGlobalization>
   </PropertyGroup>
   <ItemGroup>

@@ -4,6 +4,7 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Microsoft.Win32;
 
 Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
 
@@ -21,8 +22,21 @@ public sealed class ColibriSyncApp
     public async Task RunAsync(string[] args)
     {
         bool debug = args.Any(a => a.Equals("--debug", StringComparison.OrdinalIgnoreCase));
+        bool installStartup = args.Any(a => a.Equals("--install-startup", StringComparison.OrdinalIgnoreCase));
+        bool uninstallStartup = args.Any(a => a.Equals("--uninstall-startup", StringComparison.OrdinalIgnoreCase));
         Console.OutputEncoding = Encoding.UTF8;
         Header();
+
+        if (installStartup)
+        {
+            InstallStartup();
+            return;
+        }
+        if (uninstallStartup)
+        {
+            UninstallStartup();
+            return;
+        }
 
         if (debug)
         {
@@ -30,7 +44,8 @@ public sealed class ColibriSyncApp
             return;
         }
 
-        Console.WriteLine("Pulsa S para sincronizar ahora, Q para salir.");
+        EnsureStartupInstalledQuietly();
+        Console.WriteLine("Pulsa S para sincronizar ahora, I para instalar inicio automático, Q para salir con clave.");
         Console.WriteLine();
         using var timer = new PeriodicTimer(TimeSpan.FromSeconds(_config.AutoSyncSeconds));
         _ = Task.Run(async () =>
@@ -45,19 +60,85 @@ public sealed class ColibriSyncApp
         while (true)
         {
             var key = Console.ReadKey(intercept: true).Key;
-            if (key == ConsoleKey.Q) break;
+            if (key == ConsoleKey.Q)
+            {
+                if (RequestClosePin()) break;
+                Log("Cierre cancelado. Clave incorrecta.");
+            }
+            if (key == ConsoleKey.I) InstallStartup();
             if (key == ConsoleKey.S) await SyncOnce(debug: false);
         }
     }
 
+
+    private bool RequestClosePin()
+    {
+        Console.WriteLine();
+        Console.Write("Clave administrador para cerrar Colibrí Engine: ");
+        var input = ReadHiddenLine();
+        Console.WriteLine();
+        return input == _config.EngineClosePin;
+    }
+
+    private static string ReadHiddenLine()
+    {
+        var sb = new StringBuilder();
+        while (true)
+        {
+            var k = Console.ReadKey(intercept: true);
+            if (k.Key == ConsoleKey.Enter) break;
+            if (k.Key == ConsoleKey.Backspace)
+            {
+                if (sb.Length > 0) sb.Length--;
+                continue;
+            }
+            sb.Append(k.KeyChar);
+        }
+        return sb.ToString();
+    }
+
+    private void EnsureStartupInstalledQuietly()
+    {
+        if (!_config.AutoInstallStartup) return;
+        try { InstallStartup(showMessage: false); } catch { }
+    }
+
+    private void InstallStartup(bool showMessage = true)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            if (showMessage) Log("Inicio automático solo disponible en Windows.");
+            return;
+        }
+        var exe = Environment.ProcessPath ?? Process.GetCurrentProcess().MainModule?.FileName;
+        if (string.IsNullOrWhiteSpace(exe))
+        {
+            if (showMessage) Log("No se pudo detectar la ruta del ejecutable.");
+            return;
+        }
+        using var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", writable: true)
+            ?? Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", writable: true);
+        key?.SetValue("ColibriEngine", $"\"{exe}\"");
+        if (showMessage) Log("Inicio automático con Windows instalado para Colibrí Engine.");
+    }
+
+    private void UninstallStartup()
+    {
+        if (!OperatingSystem.IsWindows()) { Log("Inicio automático solo disponible en Windows."); return; }
+        using var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", writable: true);
+        key?.DeleteValue("ColibriEngine", throwOnMissingValue: false);
+        Log("Inicio automático de Colibrí Engine eliminado.");
+    }
+
     private void Header()
     {
-        Console.WriteLine("🐦 Colibrí Engine 3.0.2 - NUMIER LIVE + Estado del Servicio");
+        Console.WriteLine("🐦 Colibrí Engine 3.0.4 - NUMIER LIVE + Estado del Servicio");
         Console.WriteLine("------------------------------------------------");
         Console.WriteLine($"Empresa: {_config.BusinessName}");
         Console.WriteLine($"Ruta NUMIER: {_config.NumierPath}");
         Console.WriteLine($"Archivos: {_config.CabeceraFile} / {_config.DetalleFile} / {_config.ArticulosFile}");
         Console.WriteLine($"Auto-sync: cada {_config.AutoSyncSeconds}s · Límite: {_config.MaxTicketsPerSync} tickets");
+        Console.WriteLine("Desarrollado por C.G. 21 S.L. · 954 533 502");
         Console.WriteLine();
     }
 
@@ -426,6 +507,8 @@ public sealed record SyncConfig
     public string SupabaseAnonKey { get; init; } = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhjY3lhb3ppdXRseHhrbGNvZnJ3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODMyNzg4NTYsImV4cCI6MjA5ODg1NDg1Nn0.gJHhvB_cVsiqirPesHdSoBwWBKzzsXSveZ-WXla3aSs";
     public int AutoSyncSeconds { get; init; } = 60;
     public int MaxTicketsPerSync { get; init; } = 500;
+    public string EngineClosePin { get; init; } = "131313";
+    public bool AutoInstallStartup { get; init; } = true;
     public string BusinessName { get; init; } = "Brasería El Colibrí";
     public static SyncConfig Default() => new();
 }
