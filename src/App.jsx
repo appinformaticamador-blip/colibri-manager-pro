@@ -108,69 +108,52 @@ async function loadArticlesMap(){
  (data||[]).forEach(a=>{const code=String(a.article_code||'').trim();if(code)map.set(code,{name:a.article_name||code,family:a.family||a.category_name||''});});
  return map;
 }
-async function fetchAllDailySales(){
- if(!supabase)return [];
- // 2023 -> hoy: numier_daily_sales tiene 1 fila por día, así que una sola consulta paginada cubre años de histórico.
- const {data,error}=await supabase.from('numier_daily_sales')
-  .select('fecha,total,tickets,ticket_medio,efectivo,tarjeta,cheque')
-  .gte('fecha','2023-01-01')
-  .order('fecha',{ascending:true})
-  .range(0,5000);
- if(error)throw error;
- return (data||[]).filter(r=>Number(r.total||0)>0);
-}
-function avg(nums){return nums.length?nums.reduce((a,b)=>a+b,0)/nums.length:0}
-function median(nums){if(!nums.length)return 0;const a=[...nums].sort((x,y)=>x-y);const m=Math.floor(a.length/2);return a.length%2?a[m]:(a[m-1]+a[m])/2}
-function sameWeekdayRows(rows,date){const target=new Date(date+'T12:00:00');return rows.filter(r=>new Date(r.fecha+'T12:00:00').getDay()===target.getDay()&&r.fecha<date)}
-async function loadIntradayShare(date,comparableDates){
- if(!supabase||date!==today()||!comparableDates.length)return {share:null,samples:0};
- const now=new Date();const minuteNow=now.getHours()*60+now.getMinutes();
- const from=comparableDates[comparableDates.length-1]; const to=addDays(comparableDates[0],1);
- const {data}=await supabase.from('numier_tickets')
-  .select('hora,total')
-  .gte('hora',from+'T00:00:00')
-  .lt('hora',to+'T00:00:00')
-  .order('hora',{ascending:true})
-  .limit(30000);
- const wanted=new Set(comparableDates);
- const by={};
- (data||[]).forEach(t=>{const d=String(t.hora||'').slice(0,10);if(!wanted.has(d))return;by[d]=by[d]||{all:0,now:0};const val=Number(t.total||0);by[d].all+=val;const h=new Date(t.hora);const m=h.getHours()*60+h.getMinutes();if(m<=minuteNow)by[d].now+=val;});
- const shares=Object.values(by).filter(x=>x.all>0).map(x=>Math.max(0.08,Math.min(1,x.now/x.all)));
- return {share:median(shares),samples:shares.length};
-}
 async function loadSmartGoal(date,currentTotal=0){
- if(!supabase)return {goal:750,base:0,projected:currentTotal,source:'objetivo base',message:'Objetivo base configurado',history:{limited:true}};
- const rows=await fetchAllDailySales();
+ if(!supabase)return {goal:750,base:0,projected:currentTotal,source:'objetivo base',message:'Objetivo base configurado',history:null};
  const target=new Date(date+'T12:00:00');
- const same=sameWeekdayRows(rows,date).sort((a,b)=>b.fecha.localeCompare(a.fecha));
- const last12=same.slice(0,12);
- const last90=same.filter(r=>{const d=new Date(r.fecha+'T12:00:00');return (target-d)/(86400000)<=90}).slice(0,20);
- const ly=new Date(target); ly.setFullYear(ly.getFullYear()-1);
- const lyStart=new Date(ly); lyStart.setDate(lyStart.getDate()-30);
- const lyEnd=new Date(ly); lyEnd.setDate(lyEnd.getDate()+30);
- const lastYear=same.filter(r=>{const d=new Date(r.fecha+'T12:00:00');return d>=lyStart&&d<=lyEnd;});
- const avgSame=avg(last12.map(r=>Number(r.total||0)));
- const avg90=avg(last90.map(r=>Number(r.total||0)));
- const avgYear=avg(lastYear.map(r=>Number(r.total||0)));
+ // IA histórica: usa hasta 4 años de histórico diario si está cargado en Supabase.
+ const from=new Date(target); from.setDate(from.getDate()-1460);
+ const {data,error}=await supabase
+  .from('numier_daily_sales')
+  .select('fecha,total,tickets,ticket_medio')
+  .gte('fecha',from.toISOString().slice(0,10))
+  .lt('fecha',date)
+  .order('fecha',{ascending:true})
+  .limit(5000);
+ const rows=(data||[]).filter(r=>Number(r.total||0)>0);
+ const sameWeekday=rows.filter(r=>new Date(r.fecha+'T12:00:00').getDay()===target.getDay());
+ const recentSame=sameWeekday.slice(-12);
+ const avgSame=recentSame.length?recentSame.reduce((a,r)=>a+Number(r.total||0),0)/recentSame.length:0;
+ const sameMonth=rows.filter(r=>{const d=new Date(r.fecha+'T12:00:00');return d.getMonth()===target.getMonth();}).slice(-90);
+ const avgMonth=sameMonth.length?sameMonth.reduce((a,r)=>a+Number(r.total||0),0)/sameMonth.length:0;
+ const ly=new Date(target); ly.setFullYear(ly.getFullYear()-1); const lyStart=new Date(ly); lyStart.setDate(lyStart.getDate()-30); const lyEnd=new Date(ly); lyEnd.setDate(lyEnd.getDate()+30);
+ const sameLastYear=rows.filter(r=>{const d=new Date(r.fecha+'T12:00:00');return d>=lyStart&&d<=lyEnd&&d.getDay()===target.getDay();});
+ const avgYear=sameLastYear.length?sameLastYear.reduce((a,r)=>a+Number(r.total||0),0)/sameLastYear.length:0;
+ const last90=rows.slice(-90); const avg90=last90.length?last90.reduce((a,r)=>a+Number(r.total||0),0)/last90.length:0;
  let base=0,source='';
- if(avgYear>0&&avgSame>0&&avg90>0){base=(avgYear*0.50)+(avgSame*0.35)+(avg90*0.15);source='histórico anual + últimos mismos días + tendencia 90 días';}
- else if(avgYear>0&&avgSame>0){base=(avgYear*0.60)+(avgSame*0.40);source='histórico anual + últimos mismos días';}
+ if(avgYear>0&&avgSame>0&&avgMonth>0){base=(avgYear*0.45)+(avgSame*0.35)+(avgMonth*0.20);source='año anterior + mismos días + época actual';}
+ else if(avgYear>0&&avgSame>0){base=(avgYear*0.6)+(avgSame*0.4);source='año anterior + últimos mismos días';}
  else if(avgSame>0){base=avgSame;source='últimos mismos días de la semana';}
- else {base=750/1.10;source='objetivo base por falta de histórico';}
+ else if(avg90>0){base=avg90;source='media últimos 90 días';}
+ else {base=750/1.10;source='objetivo base';}
  const goal=Math.round(base*(1+SMART_GROWTH_TARGET));
- const comparableDates=last12.map(r=>r.fecha);
- const intraday=await loadIntradayShare(date,comparableDates);
- let projected=currentTotal;
+ let elapsed=1;
  if(date===today()){
-  const share=intraday.share||Math.max(0.08,Math.min(1,((new Date().getHours()+new Date().getMinutes()/60)-8)/(23.5-8)));
-  projected=Math.max(currentTotal, currentTotal/share);
+  const now=new Date();
+  const hour=now.getHours()+now.getMinutes()/60;
+  // curva simple inicial: 08:00 a 23:30; se irá refinando con histórico horario.
+  elapsed=Math.max(0.06,Math.min(1,(hour-8)/(23.5-8)));
  }
+ const projected=date===today()?Math.max(currentTotal,currentTotal/elapsed):currentTotal;
  const diff=currentTotal-goal;
- let message=currentTotal>=goal?`Objetivo IA superado en ${money(diff)}.`:`Faltan ${money(Math.abs(diff))} para alcanzar el objetivo IA de hoy.`;
- if(date===today()) message+=` Predicción de cierre basada en histórico: ${money(projected)}.`;
+ const first=rows[0]?.fecha||null; const last=rows[rows.length-1]?.fecha||null;
  const years=[...new Set(rows.map(r=>String(r.fecha).slice(0,4)))];
- return {goal,base,projected,source,message,avgSame,avg90,avgYear,growth:SMART_GROWTH_TARGET,intraday,history:{from:rows[0]?.fecha||null,to:rows.at(-1)?.fecha||null,days:rows.length,years,totalSales:rows.reduce((a,r)=>a+Number(r.total||0),0),totalTickets:rows.reduce((a,r)=>a+Number(r.tickets||0),0),sameSamples:last12.length,yearSamples:lastYear.length,trendSamples:last90.length}};
+ const totalTickets=rows.reduce((a,r)=>a+Number(r.tickets||0),0);
+ const history={first,last,days:rows.length,years,totalTickets,avgSame,avgYear,avgMonth,avg90,source,error:error?.message||null};
+ const message=currentTotal>=goal?`Objetivo IA superado en ${money(diff)}.`:`Faltan ${money(Math.abs(diff))} para alcanzar el objetivo IA de hoy.`;
+ return {goal,base,projected,source,message,avgSame,avgYear,avgMonth,avg90,growth:SMART_GROWTH_TARGET,history};
 }
+
 async function loadSalesRange(from,to){
  if(!supabase)return {tickets:[],lines:[],sync:null,articles:new Map()};
  const start=from+'T00:00:00'; const end=to+'T00:00:00';
@@ -210,7 +193,7 @@ function ShiftProfitability({tickets,clockRows}){
  shiftStats.forEach(s=>{s.cost=s.staffHours*EMPLOYEE_HOUR_COST; s.profitIndex=s.sales-s.cost; s.eurosHour=s.staffHours?s.sales/s.staffHours:0});
  return <div className="card"><h2>⏰ Rentabilidad por turnos</h2><p className="mutedText">Coste empleado configurado: <b>7 €/h</b></p><table><thead><tr><th>Turno</th><th>Ventas</th><th>Tickets</th><th>Horas personal</th><th>Coste personal</th><th>Índice</th></tr></thead><tbody>{shiftStats.map(s=><tr key={s.id}><td><b>{s.name}</b></td><td>{money(s.sales)}</td><td>{s.tickets}</td><td>{s.staffHours.toFixed(1)} h</td><td>{money(s.cost)}</td><td><b className={s.profitIndex>=0?'ok':'bad'}>{money(s.profitIndex)}</b></td></tr>)}</tbody></table></div>
 }
-function PredictionBox({mode,date,tickets}){const total=tickets.reduce((a,t)=>a+Number(t.total||0),0);const[goal,setGoal]=useState(null);useEffect(()=>{let ok=true;loadSmartGoal(date,total).then(g=>ok&&setGoal(g)).catch(()=>{});return()=>{ok=false}},[date,total]);const projected=Number(goal?.projected||total);return <div className="card"><h2>🔮 Predicción IA histórica</h2>{mode==='hoy'?<><p>Ventas actuales: <b>{money(total)}</b></p><p>Objetivo IA +10%: <b>{money(goal?.goal||750)}</b></p><p>Cierre estimado: <b>{money(Math.max(total,projected))}</b></p></>:<p>Periodo seleccionado: <b>{money(total)}</b></p>}<p className="mutedText">{goal?.source?`Basado en ${goal.source}. Histórico desde ${goal.history?.from||'-'}.`:'Calculando histórico...'}</p></div>}
+function PredictionBox({mode,date,tickets}){const total=tickets.reduce((a,t)=>a+Number(t.total||0),0);const projected=mode==='hoy'? total/Math.max(0.25,(new Date().getHours()+new Date().getMinutes()/60-8)/15.5) : total;return <div className="card"><h2>🔮 Predicción rápida</h2>{mode==='hoy'?<><p>Ventas actuales: <b>{money(total)}</b></p><p>Si el ritmo se mantiene, cierre estimado: <b>{money(Math.max(total,projected))}</b></p></>:<p>Selecciona <b>Hoy</b> para ver predicción de cierre.</p>}<p className="mutedText">La predicción mejorará cuando acumulemos más histórico por día de semana.</p></div>}
 function BusinessIntelligence(){const[mode,setMode]=useState('hoy');const[date,setDate]=useState(today());const[bi,setBi]=useState({tickets:[],lines:[],sync:null,articles:new Map()});const[clock,setClock]=useState([]);const[loading,setLoading]=useState(false);const r=rangeDates(mode,date);useEffect(()=>{load();const t=setInterval(load,60000);return()=>clearInterval(t)},[mode,date]);async function load(){if(!supabase)return;setLoading(true);const [{tickets,lines,sync,articles},{data:clockData}]=await Promise.all([loadSalesRange(r.from,r.to),supabase.from('clock_records').select('*').gte('created_at',r.from+'T00:00:00').lt('created_at',r.to+'T00:00:00').order('created_at',{ascending:true}).limit(5000)]);setBi({tickets,lines,sync,articles});setClock(clockData||[]);setLoading(false)}const daily=summarizeTickets(bi.tickets);return <div><div className="card hero"><div><h2>📊 Inteligencia de Negocio v2.4</h2><p>{r.label}</p></div><div className="row controls"><button className={mode==='hoy'?'active':''} onClick={()=>setMode('hoy')}>Hoy</button><button className={mode==='ayer'?'active':''} onClick={()=>setMode('ayer')}>Ayer</button><button className={mode==='semana'?'active':''} onClick={()=>setMode('semana')}>7 días</button><button className={mode==='mes'?'active':''} onClick={()=>setMode('mes')}>Mes</button><input type="date" value={date} onChange={e=>{setDate(e.target.value);setMode('fecha')}}/><button onClick={load}>{loading?'Cargando...':'Actualizar'}</button></div></div><SyncStatusCard/><SalesCards daily={daily} sync={bi.sync}/><div className="grid"><PredictionBox mode={mode} date={date} tickets={bi.tickets}/><div className="card"><h2>📈 Ventas por hora</h2><SalesByHour tickets={bi.tickets}/></div></div><ShiftProfitability tickets={bi.tickets} clockRows={clock}/><ProductRanking lines={bi.lines} articles={bi.articles}/><DailyReport summary={daily} lines={bi.lines} tickets={bi.tickets} clockRows={clock} period={r}/></div>}
 
 const TERRACE_TABLES=[
@@ -244,7 +227,8 @@ function ServiceTable({def,account,onOpen}){
  </button>
 }
 function ServiceZoneMap({title,tables,openByMesa,onOpen}){return <div className="serviceZone"><h3>{title}</h3><div className="floorGrid">{tables.map(t=><ServiceTable key={t.n} def={t} account={openByMesa.get(t.n)} onOpen={onOpen}/>)}</div></div>}
-function MesaModal({account,onClose}){if(!account)return null;const mins=minutesOpen(account.opened_at);return <div className="modal" onClick={onClose}><div className="card mesaModal" onClick={e=>e.stopPropagation()}><div className="row between"><h2>{account.zona==='barra'?'Cuenta rápida':`Mesa ${account.mesa_numero}`}</h2><button className="red" onClick={onClose}>Cerrar</button></div><div className="mesaModalGrid"><p><span>Estado</span><b>Cuenta abierta</b></p><p><span>Consumo actual</span><b>{money(account.total)}</b></p><p><span>Tiempo abierta</span><b>{durationShort(mins)}</b></p><p><span>Zona</span><b>{account.zona==='terraza'?'Terraza':account.zona==='salon'?'Salón':'Barra'}</b></p><p><span>Apertura</span><b>{account.opened_at?new Date(account.opened_at).toLocaleTimeString('es-ES'): '-'}</b></p><p><span>CAB_ID</span><b>{account.cab_id}</b></p></div><p className="mutedText">En una siguiente iteración esta ficha enlazará con el ticket completo y sus productos.</p></div></div>}
+function MesaModal({account,onClose}){if(!account)return null;return <TicketDetailModal account={account} onClose={onClose}/>}
+
 function EstadoServicio(){
  const[state,setState]=useState({open:[],status:null,error:null});
  const[daily,setDaily]=useState(null);
@@ -296,27 +280,6 @@ function buildDashboardTimeline(tickets,clockRows,daily,objective){
  return events.sort((a,b)=>new Date(a.time)-new Date(b.time)).slice(0,10);
 }
 function workingFromClock(rows){const latest=new Map();(rows||[]).forEach(r=>{const k=r.employee_id||r.employee_name;if(!latest.has(k))latest.set(k,r)});return [...latest.values()].filter(r=>String(r.type).toLowerCase()==='entrada')}
-
-function HistoricalAiPanel({goal,summary}){
- const h=goal?.history||{}; const projected=Number(goal?.projected||summary.total||0); const objective=Number(goal?.goal||750);
- const diff=projected-objective; const ok=projected>=objective;
- return <div className="card historicalAi">
-  <div className="row between"><h2>🧠 IA histórica</h2><span className="pill">Histórico profundo</span></div>
-  <div className="historyGrid">
-   <p><span>Datos disponibles</span><b>{h.from?`${h.from} → ${h.to}`:'Sin histórico'}</b></p>
-   <p><span>Días analizados</span><b>{Number(h.days||0).toLocaleString('es-ES')}</b></p>
-   <p><span>Tickets históricos</span><b>{Number(h.totalTickets||0).toLocaleString('es-ES')}</b></p>
-   <p><span>Años</span><b>{(h.years||[]).join(', ')||'-'}</b></p>
-   <p><span>Mismos días usados</span><b>{h.sameSamples||0}</b></p>
-   <p><span>Muestra año anterior</span><b>{h.yearSamples||0}</b></p>
-  </div>
-  <p><b>Objetivo IA:</b> {money(objective)} · base histórica {money(goal?.base||0)} + crecimiento del 10%.</p>
-  <p><b>Predicción de cierre:</b> {money(projected)} · {ok?'por encima':'por debajo'} del objetivo en <b>{money(Math.abs(diff))}</b>.</p>
-  <p className="mutedText">Fuente: {goal?.source||'-'}{goal?.intraday?.samples?` · curva intradía con ${goal.intraday.samples} días comparables`:''}.</p>
-  {(!h.days||h.days<60)&&<p className="alertSoft">IA limitada: todavía hay poco histórico cargado.</p>}
- </div>
-}
-
 function Dashboard(){
  const[date,setDate]=useState(today());
  const[state,setState]=useState({tickets:[],lines:[],articles:new Map(),clock:[],sync:null,syncStatus:null,prev:null,avgSameDay:null,goal:null,loading:true,error:null});
@@ -360,8 +323,8 @@ function Dashboard(){
   <SyncStatusCard/>
   <div className="proGrid"><div className="proKpi"><span>Ventas hoy</span><b>{money(summary.total)}</b><em>{formatPct(vsPrev)} vs semana pasada</em></div><div className="proKpi"><span>Objetivo IA +10%</span><b>{money(objective)}</b><em>{progress.toFixed(1)}% conseguido</em></div><div className="proKpi"><span>Predicción cierre</span><b>{money(projected)}</b><em>{projected>=objective?'por encima':'por debajo'} del objetivo</em></div><div className="proKpi"><span>Tickets</span><b>{summary.tickets}</b><em>{money(summary.ticket_medio)} ticket medio</em></div><div className="proKpi"><span>Personal</span><b>{working.length}</b><em>trabajando ahora</em></div></div>
   <div className="card objectiveCard"><div className="row between"><h2>{statusColor} Objetivo inteligente</h2><b>{progress.toFixed(1)}%</b></div><div className="progress"><i style={{width:`${progress}%`}}></i></div><p>{aiText}</p><p className="mutedText">Crecimiento objetivo aplicado: +10% sobre histórico comparable.</p></div>
-  <HistoricalAiPanel goal={state.goal} summary={summary}/>
-  <div className="grid"><div className="card"><h2>🧠 Qué deberías saber ahora</h2><p>{aiText}</p><p>Media últimos días similares: <b>{state.goal?.avgSame?money(state.goal.avgSame):state.avgSameDay?money(state.avgSameDay):'-'}</b></p><p>Mismo periodo año anterior: <b>{state.goal?.avgYear?money(state.goal.avgYear):'-'}</b></p></div><div className="card"><h2>📈 Ventas por hora</h2><SalesByHour tickets={state.tickets}/></div><div className="card"><h2>👥 Trabajando ahora</h2><div className="big">{working.length}</div>{working.map(w=><p key={w.id}>🟢 {w.employee_name}</p>)}</div></div>
+  <div className="card historyBrain"><h2>🧠 IA histórica</h2><div className="historyGrid"><p><span>Datos desde</span><b>{state.goal?.history?.first||'-'}</b></p><p><span>Hasta</span><b>{state.goal?.history?.last||'-'}</b></p><p><span>Días analizados</span><b>{Number(state.goal?.history?.days||0).toLocaleString('es-ES')}</b></p><p><span>Tickets históricos</span><b>{Number(state.goal?.history?.totalTickets||0).toLocaleString('es-ES')}</b></p><p><span>Años</span><b>{(state.goal?.history?.years||[]).join(', ')||'-'}</b></p><p><span>Fuente objetivo</span><b>{state.goal?.source||'-'}</b></p></div><p className="mutedText">La predicción usa el histórico disponible en Supabase. Si aquí no aparece 2023, falta reconstruir/volcar ese histórico en tablas agregadas.</p></div>
+  <div className="grid"><div className="card"><h2>🧠 Qué deberías saber ahora</h2><p>{aiText}</p><p>Media últimos días similares: <b>{state.avgSameDay?money(state.avgSameDay):'-'}</b></p></div><div className="card"><h2>📈 Ventas por hora</h2><SalesByHour tickets={state.tickets}/></div><div className="card"><h2>👥 Trabajando ahora</h2><div className="big">{working.length}</div>{working.map(w=><p key={w.id}>🟢 {w.employee_name}</p>)}</div></div>
   <div className="grid"><div className="card"><h2>🥇 Productos TOP</h2>{topProducts.length?topProducts.map((p,i)=><p key={p.name}>{i===0?'🥇':i===1?'🥈':i===2?'🥉':i+1} <b>{p.name}</b> · {p.qty.toFixed(0)} uds · {money(p.total)}</p>):<p>Sin productos en el periodo.</p>}</div><div className="card"><h2>🕒 Timeline del día</h2>{timeline.length?timeline.map((e,i)=><p key={i}><b>{safeHour(e.time)}</b> {e.icon} {e.text}</p>):<p>Aún sin eventos suficientes.</p>}</div></div>
   <ProductRanking lines={state.lines} articles={state.articles}/>
  </div>}
@@ -372,6 +335,29 @@ function ClockPanel(){const[rows,setRows]=useState([]);const[open,setOpen]=useSt
 function Schedule(){const [data,setData]=useState(()=>JSON.parse(localStorage.colibriSchedule||'{}'));const [selected,setSelected]=useState(null);const [employees,setEmployees]=useState([]);useEffect(()=>{supabase?.from('employees').select('*').eq('active',true).then(({data})=>setEmployees(data||[]))},[]);function key(d,s){return `${week()}|${d}|${s}`}function toggle(emp){const k=key(selected.d,selected.s);let arr=data[k]||[];arr=arr.find(x=>x.id===emp.id)?arr.filter(x=>x.id!==emp.id):(arr.length<3?[...arr,emp]:arr);const nd={...data,[k]:arr};setData(nd);localStorage.colibriSchedule=JSON.stringify(nd)}function hours(){const m={};Object.entries(data).forEach(([k,arr])=>{const slot=k.split('|')[2];arr.forEach(e=>m[e.name]=(m[e.name]||0)+h(slot))});return m}return <div className="card"><h2>Cuadrante semanal {week()}</h2><table className="schedule"><thead><tr><th>Hora</th>{DAYS.map(d=><th>{d}</th>)}</tr></thead><tbody>{SLOTS.map(s=><tr><td>{s}</td>{DAYS.map(d=><td onClick={()=>setSelected({d,s})}>{(data[key(d,s)]||[]).map(e=><span className="badge" style={{background:e.color}}>{e.name}</span>)}</td>)}</tr>)}</tbody></table><h3>Horas</h3>{Object.entries(hours()).map(([n,v])=><p>{n}: {v} h</p>)}{selected&&<div className="modal"><div className="card narrow"><h3>{selected.d} {selected.s}</h3>{employees.map(e=><button className="empbtn" onClick={()=>toggle(e)}><span className="sq" style={{background:e.color}}/> {e.name}</button>)}<button onClick={()=>setSelected(null)}>Guardar y cerrar</button></div></div>}</div>}
 function Compare(){const[text,setText]=useState('');const[name,setName]=useState('');function calc(){const clean=text.replace(/_/g,'');let total=0;for(const line of clean.split('\n')){const times=[...line.matchAll(/entrada\s*(\d{1,2}):(\d{2})\s*salida\s*(\d{1,2}):(\d{2})/gi)];const seen=new Set();times.forEach(m=>{const k=m[0];if(seen.has(k))return;seen.add(k);const a=+m[1]*60+ +m[2],b=+m[3]*60+ +m[4];if(b>a)total+=(b-a)/60})}return total}return <div className="card"><h2>Comparador WhatsApp vs cuadrante</h2><input placeholder="Empleado" value={name} onChange={e=>setName(e.target.value)}/><textarea rows="12" placeholder="Pega plantilla WhatsApp" value={text} onChange={e=>setText(e.target.value)}/><h3>Horas declaradas detectadas: {calc()} h</h3><p>Compara este total con el resumen de cuadrante semanal.</p></div>}
 
-function TPV(){const[date,setDate]=useState(today());const[data,setData]=useState({daily:null,tickets:[],sync:null,error:null});const[loading,setLoading]=useState(false);useEffect(()=>{load();const t=setInterval(load,30000);return()=>clearInterval(t)},[date]);async function load(){setLoading(true);const d=await loadSalesForDate(date);setData(d);setLoading(false)}const tickets=data.tickets||[];return <div><div className="card hero"><div><h2>NUMIER LIVE</h2><p>Ventas, tickets y formas de pago desde Colibrí Sync.</p></div><div className="row controls"><button onClick={()=>setDate(today())}>Hoy</button><button onClick={()=>setDate(addDays(today(),-1))}>Ayer</button><button onClick={()=>setDate(addDays(date,-1))}>◀ Día</button><button onClick={()=>setDate(addDays(date,1))}>Día ▶</button><input type="date" value={date} onChange={e=>setDate(e.target.value)}/><button onClick={load}>{loading?'Cargando...':'Actualizar'}</button></div></div><SyncStatusCard/><SalesCards daily={data.daily} sync={data.sync}/><div className="grid"><div className="card"><h2>Ventas por hora</h2><SalesByHour tickets={tickets}/></div><div className="card"><h2>Últimos tickets</h2><table><thead><tr><th>Hora</th><th>Ticket</th><th>Pago</th><th>Total</th></tr></thead><tbody>{tickets.slice(-30).reverse().map(t=><tr key={t.id||t.cab_id}><td>{t.hora?new Date(t.hora).toLocaleTimeString('es-ES'):''}</td><td>{t.numdoc||t.cab_id}</td><td>{t.forma_pago||''}</td><td>{money(t.total)}</td></tr>)}</tbody></table></div><div className="card"><h2>Resumen</h2><p>Fecha: <b>{fmtDate(date)}</b></p><p>Tickets cargados: <b>{tickets.length}</b></p><p>Última sincronización: <b>{data.sync?.synced_at?new Date(data.sync.synced_at).toLocaleString('es-ES'):'-'}</b></p>{data.error&&<p className="error">{data.error}</p>}</div></div></div>}
+function TPV(){
+ const[date,setDate]=useState(today());
+ const[data,setData]=useState({daily:null,tickets:[],sync:null,error:null});
+ const[loading,setLoading]=useState(false);
+ const[selected,setSelected]=useState(null);
+ const[search,setSearch]=useState('');
+ useEffect(()=>{load();const t=setInterval(load,30000);return()=>clearInterval(t)},[date]);
+ async function load(){setLoading(true);const d=await loadSalesForDate(date);setData(d);setLoading(false)}
+ async function searchTicket(){
+  const q=search.trim(); if(!q||!supabase)return;
+  let res;
+  if(/^\d+$/.test(q))res=await supabase.from('numier_tickets').select('*').eq('cab_id',Number(q)).maybeSingle();
+  else res=await supabase.from('numier_tickets').select('*').ilike('numdoc',`%${q}%`).order('hora',{ascending:false}).limit(1).maybeSingle();
+  if(res.error||!res.data){alert('Ticket no encontrado');return}
+  setSelected(res.data);
+ }
+ const tickets=data.tickets||[];
+ return <div><div className="card hero"><div><h2>NUMIER LIVE</h2><p>Ventas, tickets y formas de pago desde Colibrí Sync.</p></div><div className="row controls"><button onClick={()=>setDate(today())}>Hoy</button><button onClick={()=>setDate(addDays(today(),-1))}>Ayer</button><button onClick={()=>setDate(addDays(date,-1))}>◀ Día</button><button onClick={()=>setDate(addDays(date,1))}>Día ▶</button><input type="date" value={date} onChange={e=>setDate(e.target.value)}/><button onClick={load}>{loading?'Cargando...':'Actualizar'}</button></div></div>
+  <SyncStatusCard/><SalesCards daily={data.daily} sync={data.sync}/>
+  <div className="card"><h2>🔎 Buscar ticket</h2><div className="row controls"><input placeholder="Número ticket o CAB_ID" value={search} onChange={e=>setSearch(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')searchTicket()}}/><button onClick={searchTicket}>Buscar</button></div></div>
+  <div className="grid"><div className="card"><h2>Ventas por hora</h2><SalesByHour tickets={tickets}/></div><div className="card"><h2>Últimos tickets</h2><p className="mutedText">Pulsa un ticket para verlo completo y copiarlo por WhatsApp.</p><table><thead><tr><th>Hora</th><th>Ticket</th><th>Pago</th><th>Total</th></tr></thead><tbody>{tickets.slice(-30).reverse().map(t=><tr className="clickable" onClick={()=>setSelected(t)} key={t.id||t.cab_id}><td>{t.hora?new Date(t.hora).toLocaleTimeString('es-ES'):''}</td><td>{t.numdoc||t.cab_id}</td><td>{t.forma_pago||''}</td><td>{money(t.total)}</td></tr>)}</tbody></table></div><div className="card"><h2>Resumen</h2><p>Fecha: <b>{fmtDate(date)}</b></p><p>Tickets cargados: <b>{tickets.length}</b></p><p>Última sincronización: <b>{data.sync?.synced_at?new Date(data.sync.synced_at).toLocaleString('es-ES'):'-'}</b></p>{data.error&&<p className="error">{data.error}</p>}</div></div>
+  {selected&&<TicketDetailModal ticket={selected} onClose={()=>setSelected(null)}/>} 
+ </div>}
+
 function Settings(){const[settings,setSettings]=useState(null);useEffect(()=>{supabase?.from('settings').select('*').single().then(({data})=>setSettings(data))},[]);async function save(){const{error}=await supabase.from('settings').upsert(settings);if(error)alert(error.message);else alert('Guardado')}if(!settings)return <div className="card">Cargando...</div>;return <div className="card"><h2>Configuración</h2><label>Latitud<input value={settings.bar_lat} onChange={e=>setSettings({...settings,bar_lat:e.target.value})}/></label><label>Longitud<input value={settings.bar_lng} onChange={e=>setSettings({...settings,bar_lng:e.target.value})}/></label><label>Radio metros<input value={settings.gps_radius_m} onChange={e=>setSettings({...settings,gps_radius_m:e.target.value})}/></label><button onClick={save}>Guardar</button><div className="qrprint"><h3>QR físico del bar</h3><p>Imprime este código y colócalo en zona de personal.</p><img src="/qr_bar_colibri.png"/></div></div>}
 createRoot(document.getElementById('root')).render(<App/>);

@@ -31,10 +31,22 @@
 .serviceAi h2{margin-top:0}.serviceAi p{font-size:18px;line-height:1.45;color:#eafff9}.serviceFormula{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}.serviceFormula span{background:#ffffff14;border:1px solid #ffffff22;border-radius:14px;padding:10px 12px;font-weight:800}.serviceFormula b{color:#7cff8a}
 .serviceTable{border:0;background:transparent;color:inherit;padding:0;cursor:pointer}.serviceTable.free{cursor:default}.serviceTable .tableCircle{position:relative;flex-direction:column;gap:0}.tableCircle small{font-size:12px;line-height:1;color:#fff;background:#073b35cc;border-radius:999px;padding:2px 6px;margin-top:1px;max-width:58px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.serviceTable.open .tableCircle small{color:#102123;background:#ffffffd8}.serviceTable.open.fresh .tableCircle{background:#2ebf5b;border-color:#1d9744;box-shadow:0 4px 0 #156a32}.serviceTable.open.notice .tableCircle{background:#f3cf2c;border-color:#d4ad18;box-shadow:0 4px 0 #c49212;color:#102123}.serviceTable.open.warn .tableCircle{background:#ff9800;border-color:#e08600;box-shadow:0 4px 0 #b66b00;color:#102123}.serviceTable.open.danger .tableCircle{background:#e74c3c;border-color:#c73b2e;box-shadow:0 4px 0 #9d2f25}.serviceTable.open.highValue .tableCircle{outline:4px solid rgba(255,255,255,.9);transform:scale(1.06)}.serviceTable.open.midValue .tableCircle{outline:2px solid rgba(255,255,255,.75)}.serviceTable.open .tableLabel b{color:#003ca8}.serviceTable.open.danger .tableLabel{border-color:#e74c3c}.serviceTable.open.warn .tableLabel{border-color:#ff9800}.serviceTable.open.fresh .tableLabel{border-color:#2ebf5b}.dot.notice{background:#f3cf2c}.dot.warn{background:#ff9800}.dot.danger{background:#e74c3c}.sideCard .occBar{grid-column:1/-1;margin:0 0 8px 0}.mesaModal{max-width:560px;width:92%;box-shadow:0 30px 80px #0008}.mesaModal h2{margin:0;color:#073b35}.mesaModalGrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin:18px 0}.mesaModalGrid p{background:#f2fbf8;border-radius:16px;padding:14px;margin:0}.mesaModalGrid span{display:block;font-size:12px;text-transform:uppercase;color:#5c7c75;font-weight:900}.mesaModalGrid b{display:block;margin-top:6px;font-size:20px;color:#073b35}.about p{line-height:1.45}@media(max-width:700px){.serviceFormula{display:block}.serviceFormula span{display:block;margin-bottom:8px}.serviceAi p{font-size:16px}.serviceTable.open.highValue .tableCircle{transform:scale(1)}}
 
-/* Sprint 3.0.5 - IA histórica */
-.historicalAi{border:1px solid rgba(23,183,139,.25);background:linear-gradient(135deg,#ffffff,#f2fffb)}
-.historyGrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin:14px 0}
-.historyGrid p{margin:0;background:#eefaf6;border-radius:18px;padding:14px}
-.historyGrid span{display:block;text-transform:uppercase;letter-spacing:.06em;font-size:.78rem;color:#617f77;font-weight:900;margin-bottom:6px}
-.historyGrid b{font-size:1.05rem;color:#073f35}
-.alertSoft{background:#fff8df;border:1px solid #f3d074;border-radius:16px;padding:12px;color:#7b5a00;font-weight:800}
+/* Sprint 3.0.6 - Ticket PRO + IA Histórica */
+.clickable{cursor:pointer;transition:background .15s ease,transform .15s ease}
+.clickable:hover{background:#eefdf7;transform:scale(1.005)}
+.ticketModal{max-width:860px;width:min(94vw,860px);max-height:88vh;overflow:auto}
+.ticketPaper{background:#fff;border:1px dashed #9fb8b0;border-radius:18px;padding:22px;margin:18px 0;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono",monospace;color:#102a2a}
+.ticketPaper h3{text-align:center;margin:0 0 8px 0;letter-spacing:.08em}
+.ticketPaper p{text-align:center;margin:4px 0;color:#345}
+.ticketPaper hr{border:0;border-top:1px dashed #9fb8b0;margin:16px 0}
+.ticketLines{width:100%;border-collapse:collapse;font-size:15px}
+.ticketLines th,.ticketLines td{padding:9px 6px;border-bottom:1px solid #edf4f1;text-align:right}
+.ticketLines th:first-child,.ticketLines td:first-child{text-align:left}
+.ticketTotal{display:flex;justify-content:space-between;align-items:center;font-size:24px;font-weight:900;color:#003f36}
+.historyBrain{background:linear-gradient(135deg,#f7fffb,#eefaf6)}
+.historyGrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px}
+.historyGrid p{background:#fff;border-radius:16px;padding:14px;margin:0;border:1px solid #dcefeb}
+.historyGrid span{display:block;text-transform:uppercase;letter-spacing:.06em;font-weight:800;color:#65827c;font-size:12px;margin-bottom:8px}
+.historyGrid b{font-size:20px;color:#053f36}
+@media(max-width:700px){.ticketModal{width:100vw;max-height:92vh;border-radius:28px 28px 0 0}.ticketLines{font-size:13px}.ticketLines th,.ticketLines td{padding:7px 3px}.ticketTotal{font-size:20px}.historyGrid{grid-template-columns:1fr 1fr}}
+@media print{body *{visibility:hidden}.ticketPaper,.ticketPaper *{visibility:visible}.ticketPaper{position:absolute;left:0;top:0;width:100%;border:0}}
