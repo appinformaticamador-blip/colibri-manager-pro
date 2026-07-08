@@ -146,6 +146,71 @@ async function loadSalesRange(from,to){
  return {tickets,lines,sync:syncData?.[0]||null,articles};
 }
 
+// Gestoría PRO: lectura sin límite de 1000 registros. Supabase devuelve por páginas.
+async function fetchAllPages(buildQuery,pageSize=1000,onProgress=null,label='registros'){
+ let all=[];
+ for(let from=0;;from+=pageSize){
+  const to=from+pageSize-1;
+  const {data,error}=await buildQuery().range(from,to);
+  if(error)throw error;
+  const batch=data||[];
+  all=all.concat(batch);
+  if(onProgress)onProgress(`Cargando ${label}: ${all.length.toLocaleString('es-ES')}...`);
+  if(batch.length<pageSize)break;
+ }
+ return all;
+}
+async function loadSalesRangeGestoria(from,to,onProgress=null){
+ if(!supabase)return {tickets:[],lines:[],sync:null,articles:new Map()};
+ const start=from+'T00:00:00'; const end=to+'T00:00:00';
+ onProgress&&onProgress('Cargando tickets del periodo completo...');
+ const tickets=await fetchAllPages(()=>supabase.from('numier_tickets').select('*').gte('hora',start).lt('hora',end).order('numdoc',{ascending:true}),1000,onProgress,'tickets');
+ const cabIds=tickets.map(t=>t.cab_id).filter(Boolean);
+ let lines=[];
+ onProgress&&onProgress(`Cargando líneas de ${cabIds.length.toLocaleString('es-ES')} tickets...`);
+ for(let i=0;i<cabIds.length;i+=80){
+  const chunk=cabIds.slice(i,i+80);
+  const part=await fetchAllPages(()=>supabase.from('numier_ticket_lines').select('*').in('cab_id',chunk).order('cab_id',{ascending:true}),1000,null,'líneas');
+  lines=lines.concat(part);
+  onProgress&&onProgress(`Cargando líneas: ${Math.min(i+80,cabIds.length).toLocaleString('es-ES')} / ${cabIds.length.toLocaleString('es-ES')} tickets`);
+ }
+ const [{data:syncData},articles]=await Promise.all([
+  supabase.from('numier_sync_files').select('*').order('synced_at',{ascending:false}).limit(1),
+  loadArticlesMap()
+ ]);
+ onProgress&&onProgress(`Completado: ${tickets.length.toLocaleString('es-ES')} tickets y ${lines.length.toLocaleString('es-ES')} líneas.`);
+ return {tickets,lines,sync:syncData?.[0]||null,articles};
+}
+function ticketOrderKey(t){
+ const raw=String(t.numdoc||t.numero||t.cab_id||'');
+ const nums=raw.match(/\d+/g);
+ return nums?Number(nums[nums.length-1]):Number(t.cab_id||0);
+}
+function formaPagoText(t){
+ const fp=String(t.forma_pago||'').trim().toUpperCase();
+ const e=Number(t.efectivo||0),ta=Number(t.tarjeta||0),ch=Number(t.cheque||0);
+ if(e>0&&ta>0)return 'Mixto efectivo/tarjeta';
+ if(ta>0||fp==='T')return 'Tarjeta';
+ if(e>0||fp==='E')return 'Efectivo';
+ if(ch>0||fp==='C')return 'Cheque/Otros';
+ if(fp==='A')return 'Mixto';
+ return fp||'-';
+}
+function ticketFiscalRows(tickets,lines){
+ const byCab=new Map();
+ (lines||[]).forEach(l=>{const k=String(l.cab_id);if(!byCab.has(k))byCab.set(k,[]);byCab.get(k).push(l)});
+ return (tickets||[]).slice().sort((a,b)=>ticketOrderKey(a)-ticketOrderKey(b)).map(t=>{
+  const ls=byCab.get(String(t.cab_id))||[];
+  const groups={0:{base:0,cuota:0,total:0},10:{base:0,cuota:0,total:0},21:{base:0,cuota:0,total:0},otros:{base:0,cuota:0,total:0}};
+  ls.forEach(l=>{const iva=Number(l.iva??l.tipo_iva??0);const total=Number(l.importe||0);const base=iva>0?total/(1+iva/100):total;const cuota=total-base;const key=iva===0?0:iva===10?10:iva===21?21:'otros';groups[key].base+=base;groups[key].cuota+=cuota;groups[key].total+=total;});
+  let baseTotal=Object.values(groups).reduce((a,g)=>a+g.base,0), ivaTotal=Object.values(groups).reduce((a,g)=>a+g.cuota,0), totalLines=Object.values(groups).reduce((a,g)=>a+g.total,0);
+  const totalTicket=Number(t.total||0);
+  if(!ls.length&&totalTicket){groups[10].total=totalTicket;groups[10].base=totalTicket/1.10;groups[10].cuota=totalTicket-groups[10].base;baseTotal=groups[10].base;ivaTotal=groups[10].cuota;totalLines=totalTicket;}
+  const fecha=t.hora?new Date(t.hora):null;
+  return {numdoc:t.numdoc||'',cab_id:t.cab_id||'',fecha:fecha?fecha.toLocaleDateString('es-ES'):'',hora:fecha?fecha.toLocaleTimeString('es-ES'):'',forma:formaPagoText(t),mesa:t.mesa||t.cab_mesa||'',estado:t.estado||'C',base0:groups[0].base,iva0:groups[0].cuota,total0:groups[0].total,base10:groups[10].base,iva10:groups[10].cuota,total10:groups[10].total,base21:groups[21].base,iva21:groups[21].cuota,total21:groups[21].total,baseOtros:groups.otros.base,ivaOtros:groups.otros.cuota,totalOtros:groups.otros.total,baseTotal,ivaTotal,total:Number(totalTicket||totalLines),efectivo:Number(t.efectivo||0),tarjeta:Number(t.tarjeta||0),otros:Number(t.cheque||0)};
+ });
+}
+
 async function loadTicketFull(cabId){
  if(!supabase||!cabId)return {ticket:null,lines:[],articles:new Map()};
  const [ticketRes,lineRes,articles]=await Promise.all([
@@ -364,7 +429,23 @@ function ClockPage(){const[employees,setEmployees]=useState([]);const[emp,setEmp
 function ClockPanel(){const[rows,setRows]=useState([]);const[open,setOpen]=useState([]);useEffect(()=>{load()},[]);async function load(){if(!supabase)return;const{data,error}=await supabase.from('clock_records').select('*').order('created_at',{ascending:false}).limit(500);if(error){alert(error.message);return}const list=data||[];setRows(list);const latest=new Map();list.forEach(r=>{if(!latest.has(r.employee_id||r.employee_name))latest.set(r.employee_id||r.employee_name,r)});setOpen([...latest.values()].filter(r=>r.type==='entrada'))}async function closeManual(r){const now=new Date();const suggested=now.toISOString().slice(0,16);const value=prompt(`Hora de salida real para ${r.employee_name} (formato YYYY-MM-DDTHH:mm)`,suggested);if(!value)return;const reason=prompt('Motivo del cierre manual','Olvido de fichaje')||'Cierre manual por manager';const exitIso=new Date(value).toISOString();const {error}=await supabase.from('clock_records').insert({employee_id:r.employee_id,employee_name:r.employee_name,type:'salida',method:'manual',inside_radius:true,note:`SALIDA MANUAL POR MANAGER · ${reason}`,created_at:exitIso});if(error){alert(error.message);return}alert('Turno cerrado manualmente');load()}const expected=expectedStartMapToday();const entradaRows=rows.filter(r=>String(r.type).toLowerCase()==='entrada');const late5=entradaRows.filter(r=>punctualityFor(r,expected).cls==='late5').length;const late10=entradaRows.filter(r=>punctualityFor(r,expected).cls==='late10').length;return <div className="grid"><div className="card"><h2>Fichajes abiertos</h2><button onClick={load}>Actualizar</button>{open.length===0&&<p>✅ No hay turnos abiertos.</p>}{open.map(r=><div className="employee" key={r.id}><b>{r.employee_name}</b><span>Entrada: {new Date(r.created_at).toLocaleString()}</span><span>{Math.max(0,((Date.now()-new Date(r.created_at))/3600000)).toFixed(1)} h abierto</span><button className="red" onClick={()=>closeManual(r)}>Cerrar turno</button></div>)}</div><div className="card"><h2>Puntualidad</h2><p>🟢 Puntual · 🟡 +5 min · ⚠️ +10 min · 🔴 Salida</p><p>Entradas amarillas: <b>{late5}</b></p><p>Alertas +10 min: <b>{late10}</b></p><p className="mutedText">La puntualidad se compara con el cuadrante semanal guardado en este navegador.</p></div><div className="card wide"><h2>Historial de fichajes</h2><table><tbody>{rows.slice(0,160).map(r=>{const p=punctualityFor(r,expected);return <tr key={r.id} className={'clockRow '+p.cls}><td>{new Date(r.created_at).toLocaleString()}</td><td>{r.employee_name}</td><td>{p.icon} {p.label}</td><td>{r.type}</td><td>{r.method}</td><td>{r.note||''}</td><td>{r.distance_m?Math.round(r.distance_m)+' m':''}</td></tr>})}</tbody></table></div></div>}
 
 function TPV(){const[date,setDate]=useState(today());const[data,setData]=useState({daily:null,tickets:[],sync:null,error:null});const[selected,setSelected]=useState(null);const[query,setQuery]=useState('');const[loading,setLoading]=useState(false);useEffect(()=>{load();const t=setInterval(load,30000);return()=>clearInterval(t)},[date]);async function load(){setLoading(true);const d=await loadSalesForDate(date);setData(d);setLoading(false)}const tickets=data.tickets||[];const filtered=tickets.filter(t=>!query||String(t.numdoc||'').includes(query)||String(t.cab_id||'').includes(query)||String(t.total||'').replace('.',',').includes(query));return <div><div className="card hero"><div><h2>NUMIER LIVE</h2><p>Ventas, tickets y formas de pago desde Colibrí Engine.</p></div><div className="row controls"><button onClick={()=>setDate(today())}>Hoy</button><button onClick={()=>setDate(addDays(today(),-1))}>Ayer</button><button onClick={()=>setDate(addDays(date,-1))}>◀ Día</button><button onClick={()=>setDate(addDays(date,1))}>Día ▶</button><input type="date" value={date} onChange={e=>setDate(e.target.value)}/><button onClick={load}>{loading?'Cargando...':'Actualizar'}</button></div></div><SyncStatusCard/><SalesCards daily={data.daily} sync={data.sync}/><div className="grid"><div className="card"><h2>Ventas por hora</h2><SalesByHour tickets={tickets}/></div><div className="card"><div className="row between"><h2>Últimos tickets</h2><input placeholder="Buscar nº, CAB_ID o importe" value={query} onChange={e=>setQuery(e.target.value)}/></div><table><thead><tr><th>Hora</th><th>Ticket</th><th>Pago</th><th>Total</th></tr></thead><tbody>{filtered.slice(-40).reverse().map(t=><tr className="clickable" key={t.id||t.cab_id} onClick={()=>setSelected(t.cab_id)}><td>{t.hora?new Date(t.hora).toLocaleTimeString('es-ES'):''}</td><td>{t.numdoc||t.cab_id}</td><td>{t.forma_pago||''}</td><td>{money(t.total)}</td></tr>)}</tbody></table></div><div className="card"><h2>Resumen</h2><p>Fecha: <b>{fmtDate(date)}</b></p><p>Tickets cargados: <b>{tickets.length}</b></p><p>Última sincronización: <b>{data.sync?.synced_at?new Date(data.sync.synced_at).toLocaleString('es-ES'):'-'}</b></p>{data.error&&<p className="error">{data.error}</p>}</div></div><TicketModal cabId={selected} onClose={()=>setSelected(null)}/></div>}
-function Gestoria(){const yNow=new Date().getFullYear();const[year,setYear]=useState(yNow);const[type,setType]=useState('trimestre');const[period,setPeriod]=useState(1);const[data,setData]=useState({tickets:[],lines:[],sync:null,articles:new Map()});const[loading,setLoading]=useState(false);const range=type==='trimestre'?quarterRange(Number(year),Number(period)):monthRange(Number(year),Number(period));useEffect(()=>{load()},[year,type,period]);async function load(){setLoading(true);setData(await loadSalesRange(range.from,range.to));setLoading(false)}const sum=summarizeTickets(data.tickets);const iva=ivaSummary(data.lines);const exportExcel=()=>{const rows=[['Informe gestoría',range.label],[],['Concepto','Importe'],['Ventas totales',sum.total],['Tickets',sum.tickets],['Ticket medio',sum.ticket_medio],['Efectivo',sum.efectivo],['Tarjeta',sum.tarjeta],['Cheque/Otros',sum.cheque],[],['IVA','Base imponible','Cuota IVA','Total'],...iva.map(r=>[r.iva+'%',r.base.toFixed(2),r.cuota.toFixed(2),r.total.toFixed(2)])];downloadFile(`Gestoria_${range.label.replaceAll(' ','_')}.csv`,asCSV(rows),'text/csv;charset=utf-8')};return <div><div className="card hero"><div><h2>📁 Gestoría contable</h2><p>Resumen fiscal para enviar a la gestoría. No incluye tickets individuales.</p></div><div className="row controls"><select value={type} onChange={e=>{setType(e.target.value);setPeriod(1)}}><option value="trimestre">Trimestre</option><option value="mes">Mes</option></select><input type="number" value={year} onChange={e=>setYear(e.target.value)}/>{type==='trimestre'?<select value={period} onChange={e=>setPeriod(e.target.value)}><option value="1">1T</option><option value="2">2T</option><option value="3">3T</option><option value="4">4T</option></select>:<select value={period} onChange={e=>setPeriod(e.target.value)}>{Array.from({length:12},(_,i)=><option value={i+1} key={i}>{String(i+1).padStart(2,'0')}</option>)}</select>}<button onClick={load}>{loading?'Cargando...':'Actualizar'}</button></div></div><SalesCards daily={sum} sync={data.sync}/><div className="grid"><div className="card"><h2>Resumen fiscal · {range.label}</h2><table><tbody><tr><td>Ventas totales</td><td>{money(sum.total)}</td></tr><tr><td>Tickets</td><td>{sum.tickets}</td></tr><tr><td>Ticket medio</td><td>{money(sum.ticket_medio)}</td></tr><tr><td>Efectivo</td><td>{money(sum.efectivo)}</td></tr><tr><td>Tarjeta</td><td>{money(sum.tarjeta)}</td></tr><tr><td>Cheque/Otros</td><td>{money(sum.cheque)}</td></tr></tbody></table><div className="row"><button onClick={exportExcel}>Exportar Excel/CSV</button><button onClick={()=>window.print()}>Imprimir / PDF</button></div></div><div className="card"><h2>Desglose IVA</h2><table><thead><tr><th>IVA</th><th>Base imponible</th><th>Cuota IVA</th><th>Total</th></tr></thead><tbody>{iva.map(r=><tr key={r.iva}><td>{r.iva}%</td><td>{money(r.base)}</td><td>{money(r.cuota)}</td><td>{money(r.total)}</td></tr>)}</tbody></table>{iva.length===0&&<p>No hay líneas de IVA para este periodo.</p>}</div></div></div>}
+function Gestoria(){
+ const yNow=new Date().getFullYear();
+ const[year,setYear]=useState(yNow);const[type,setType]=useState('trimestre');const[period,setPeriod]=useState(1);
+ const[data,setData]=useState({tickets:[],lines:[],sync:null,articles:new Map()});const[loading,setLoading]=useState(false);const[progress,setProgress]=useState('');
+ const range=type==='trimestre'?quarterRange(Number(year),Number(period)):monthRange(Number(year),Number(period));
+ useEffect(()=>{load()},[year,type,period]);
+ async function load(){
+  try{setLoading(true);setProgress('Preparando gestoría...');setData(await loadSalesRangeGestoria(range.from,range.to,setProgress));}
+  catch(e){alert('Error cargando gestoría: '+(e.message||String(e)));}
+  finally{setLoading(false);}
+ }
+ const sum=summarizeTickets(data.tickets);const iva=ivaSummary(data.lines);const fiscalRows=ticketFiscalRows(data.tickets,data.lines);
+ const exportResumen=()=>{const rows=[['Informe gestoría',range.label],['Rango',range.from,range.to],['Tickets incluidos',fiscalRows.length],[],['Concepto','Importe'],['Ventas totales',sum.total.toFixed(2)],['Tickets',sum.tickets],['Ticket medio',sum.ticket_medio.toFixed(2)],['Efectivo',sum.efectivo.toFixed(2)],['Tarjeta',sum.tarjeta.toFixed(2)],['Cheque/Otros',sum.cheque.toFixed(2)],[],['IVA','Base imponible','Cuota IVA','Total'],...iva.map(r=>[r.iva+'%',r.base.toFixed(2),r.cuota.toFixed(2),r.total.toFixed(2)])];downloadFile(`Gestoria_RESUMEN_${range.label.replaceAll(' ','_')}.csv`,asCSV(rows),'text/csv;charset=utf-8')};
+ const exportTickets=()=>{const rows=[['Nº ticket','CAB_ID','Fecha','Hora','Forma pago','Mesa','Estado','Base 0%','IVA 0%','Total 0%','Base 10%','IVA 10%','Total 10%','Base 21%','IVA 21%','Total 21%','Base otros','IVA otros','Total otros','Base total','IVA total','Total ticket','Efectivo','Tarjeta','Cheque/Otros'],...fiscalRows.map(r=>[r.numdoc,r.cab_id,r.fecha,r.hora,r.forma,r.mesa,r.estado,r.base0.toFixed(2),r.iva0.toFixed(2),r.total0.toFixed(2),r.base10.toFixed(2),r.iva10.toFixed(2),r.total10.toFixed(2),r.base21.toFixed(2),r.iva21.toFixed(2),r.total21.toFixed(2),r.baseOtros.toFixed(2),r.ivaOtros.toFixed(2),r.totalOtros.toFixed(2),r.baseTotal.toFixed(2),r.ivaTotal.toFixed(2),r.total.toFixed(2),r.efectivo.toFixed(2),r.tarjeta.toFixed(2),r.otros.toFixed(2)])];downloadFile(`Gestoria_TICKETS_${range.label.replaceAll(' ','_')}.csv`,asCSV(rows),'text/csv;charset=utf-8')};
+ return <div><div className="card hero"><div><h2>📁 Gestoría contable PRO</h2><p>Informe fiscal completo sin límite de 1000 tickets. Incluye listado de tickets con IVA y forma de pago.</p></div><div className="row controls"><select value={type} onChange={e=>{setType(e.target.value);setPeriod(1)}}><option value="trimestre">Trimestre</option><option value="mes">Mes</option></select><input type="number" value={year} onChange={e=>setYear(e.target.value)}/>{type==='trimestre'?<select value={period} onChange={e=>setPeriod(e.target.value)}><option value="1">1T</option><option value="2">2T</option><option value="3">3T</option><option value="4">4T</option></select>:<select value={period} onChange={e=>setPeriod(e.target.value)}>{Array.from({length:12},(_,i)=><option value={i+1} key={i}>{String(i+1).padStart(2,'0')}</option>)}</select>}<button onClick={load}>{loading?'Cargando...':'Actualizar'}</button></div></div>{loading&&<div className="card"><h2>Procesando informe...</h2><p>{progress}</p></div>}<SalesCards daily={sum} sync={data.sync}/><div className="grid"><div className="card"><h2>Resumen fiscal · {range.label}</h2><table><tbody><tr><td>Ventas totales</td><td>{money(sum.total)}</td></tr><tr><td>Tickets reales incluidos</td><td>{sum.tickets}</td></tr><tr><td>Ticket medio</td><td>{money(sum.ticket_medio)}</td></tr><tr><td>Efectivo</td><td>{money(sum.efectivo)}</td></tr><tr><td>Tarjeta</td><td>{money(sum.tarjeta)}</td></tr><tr><td>Cheque/Otros</td><td>{money(sum.cheque)}</td></tr></tbody></table><div className="row"><button onClick={exportResumen}>Exportar resumen CSV</button><button onClick={exportTickets}>Exportar listado tickets CSV</button><button onClick={()=>window.print()}>Imprimir / PDF</button></div><p className="mutedText">El listado de tickets se ordena por número de ticket e incluye base imponible, IVA, total y forma de pago.</p></div><div className="card"><h2>Desglose IVA</h2><table><thead><tr><th>IVA</th><th>Base imponible</th><th>Cuota IVA</th><th>Total</th></tr></thead><tbody>{iva.map(r=><tr key={r.iva}><td>{r.iva}%</td><td>{money(r.base)}</td><td>{money(r.cuota)}</td><td>{money(r.total)}</td></tr>)}</tbody></table>{iva.length===0&&<p>No hay líneas de IVA para este periodo.</p>}</div></div><div className="card"><h2>Listado de tickets incluidos</h2><p>{fiscalRows.length.toLocaleString('es-ES')} tickets cargados en este periodo.</p><table><thead><tr><th>Nº ticket</th><th>Fecha</th><th>Hora</th><th>Forma pago</th><th>Base</th><th>IVA</th><th>Total</th></tr></thead><tbody>{fiscalRows.slice(0,200).map(r=><tr key={r.cab_id}><td>{r.numdoc||r.cab_id}</td><td>{r.fecha}</td><td>{r.hora}</td><td>{r.forma}</td><td>{money(r.baseTotal)}</td><td>{money(r.ivaTotal)}</td><td>{money(r.total)}</td></tr>)}</tbody></table>{fiscalRows.length>200&&<p className="mutedText">Mostrando 200 primeros en pantalla. La exportación incluye todos.</p>}</div></div>
+}
+
 
 // ARRANQUE REACT - FIX PANTALLA BLANCA
 const rootEl = document.getElementById('root');
