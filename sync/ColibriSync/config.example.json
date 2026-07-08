@@ -3,13 +3,10 @@
   "cabecera_file": "cabecera.DBF",
   "detalle_file": "detalle.DBF",
   "articulos_file": "articulos.DBF",
-  "categorias_file": "categorias.DBF",
   "supabase_url": "https://xccyaoziutlxxklcofrw.supabase.co",
   "supabase_anon_key": "",
   "auto_sync_seconds": 60,
   "max_tickets_per_sync": 500,
   "business_name": "Brasería El Colibrí",
-  "admin_exit_password": "131313",
-  "app_version": "3.1.0-rc1",
-  "build": "2026.07.08.001"
+  "admin_exit_password": "131313"
 }

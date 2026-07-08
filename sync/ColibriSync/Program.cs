@@ -52,7 +52,7 @@ public sealed class ColibriSyncApp
 
     private void Header()
     {
-        Console.WriteLine("🐦 Colibrí Engine 3.0.2 - NUMIER LIVE + Estado del Servicio");
+        Console.WriteLine("🐦 Colibrí Engine 3.1.0 RC2 - NUMIER LIVE + Estado del Servicio");
         Console.WriteLine("------------------------------------------------");
         Console.WriteLine($"Empresa: {_config.BusinessName}");
         Console.WriteLine($"Ruta NUMIER: {_config.NumierPath}");
@@ -136,6 +136,34 @@ public sealed class ColibriSyncApp
             });
         }
 
+
+        // Auditoría operativa: N = borrada manualmente, X = anulada, G = gasto. No suma como venta ni pendiente.
+        var auditEvents = new List<AuditEventDto>();
+        foreach (var rec in cabDbf.Records())
+        {
+            long cabId = rec.GetLong("CAB_ID");
+            string estado = FirstNonEmpty(rec.GetString("CAB_ESTADO"), rec.GetString("CAB_EST"));
+            if (!(estado.Equals("N", StringComparison.OrdinalIgnoreCase) || estado.Equals("X", StringComparison.OrdinalIgnoreCase) || estado.Equals("G", StringComparison.OrdinalIgnoreCase))) continue;
+            var fecha = rec.GetDate("CAB_FECHA") ?? DateTime.Today;
+            var hora = rec.GetVfpDateTime("CAB_HORA") ?? fecha;
+            string mesaRaw = FirstNonEmpty(rec.GetString("CAB_MESA"), rec.GetString("CABMESA"), rec.GetString("MESA"));
+            int mesaNum = ParseMesa(mesaRaw);
+            auditEvents.Add(new AuditEventDto
+            {
+                CabId = cabId,
+                Estado = estado.ToUpperInvariant(),
+                Mesa = mesaRaw,
+                MesaNumero = mesaNum,
+                Zona = ZoneForMesa(mesaNum),
+                Hora = hora.ToUniversalTime().ToString("O"),
+                Numdoc = FirstNonEmpty(rec.GetString("CAB_NUMDOC"), rec.GetString("NUMDOC")),
+                Total = FirstDecimal(rec, new [] { "CAB_TOTAL", "CAB_TOT", "CAB_IMPOR", "CAB_IMPORTE", "TOTAL" }),
+                LastSeenAt = DateTime.UtcNow.ToString("O")
+            });
+        }
+        await api.UpsertAuditEventsAsync(auditEvents);
+        if (auditEvents.Count > 0) Log($"Auditoría operativa: {auditEvents.Count:N0} eventos N/X/G registrados.");
+
         if (openAccounts.Count > 0)
         {
             var openTotals = new Dictionary<long, decimal>();
@@ -150,13 +178,12 @@ public sealed class ColibriSyncApp
                 openTotals[cabId] = openTotals.GetValueOrDefault(cabId) + importe;
                 var lineId = r.GetLong("ID");
                 if (lineId <= 0) lineId = openDetailScanned;
-                string artCode = r.GetString("DET_ARTICU");
                 openLines.Add(new TicketLineDto
                 {
                     CabId = cabId,
                     LineKey = $"{cabId}-{lineId}",
-                    Articulo = artCode,
-                    Descripcion = ArticleName(articleMap, artCode, FirstNonEmpty(r.GetString("DET_CAD_PR"), r.GetString("DET_OPCION"))),
+                    Articulo = r.GetString("DET_ARTICU"),
+                    Descripcion = ArticleName(articleMap, r.GetString("DET_ARTICU"), FirstNonEmpty(r.GetString("DET_CAD_PR"), r.GetString("DET_OPCION"))),
                     Cantidad = r.GetDecimal("DET_CANTID"),
                     Precio = r.GetDecimal("DET_PRECIO"),
                     Importe = importe,
@@ -167,11 +194,7 @@ public sealed class ColibriSyncApp
             {
                 if (oa.Total <= 0 && openTotals.TryGetValue(oa.CabId, out var tv)) oa.Total = tv;
             }
-            if (openLines.Count > 0)
-            {
-                await api.UpsertLinesAsync(openLines);
-                Log($"Líneas de cuentas abiertas sincronizadas: {openLines.Count:N0}");
-            }
+            await api.UpsertLinesAsync(openLines);
         }
         await api.UpsertOpenAccountsAsync(openAccounts);
         await api.MarkOpenAccountsSnapshotAsync();
@@ -355,7 +378,7 @@ public sealed class ColibriSyncApp
 
     private static string ZoneForMesa(int mesa)
     {
-        if (mesa >= 0 && mesa <= 19) return "terraza";
+        if (mesa >= 1 && mesa <= 19) return "terraza";
         if (mesa >= 20 && mesa <= 30) return "salon";
         return "barra";
     }
@@ -483,6 +506,7 @@ public sealed class SupabaseRest : IDisposable
     public async Task UpsertLinesAsync(IEnumerable<TicketLineDto> rows) => await Upsert("numier_ticket_lines", "line_key", rows);
     public async Task UpsertArticlesAsync(IEnumerable<ArticleDto> rows) => await Upsert("numier_articles", "article_code", rows);
     public async Task UpsertOpenAccountsAsync(IEnumerable<OpenAccountDto> rows) => await Upsert("numier_open_accounts", "cab_id", rows);
+    public async Task UpsertAuditEventsAsync(IEnumerable<AuditEventDto> rows) => await Upsert("numier_audit_events", "cab_id", rows);
     public async Task MarkOpenAccountsSnapshotAsync()
     {
         var row = new[] { new ServiceStatusDto { StatusKey = "service", UpdatedAt = DateTime.UtcNow.ToString("O") } };
@@ -557,6 +581,19 @@ public sealed class OpenAccountDto
     [JsonPropertyName("opened_at")] public string? OpenedAt { get; set; }
     [JsonPropertyName("numdoc")] public string? Numdoc { get; set; }
     [JsonPropertyName("status")] public string? Status { get; set; }
+    [JsonPropertyName("total")] public decimal Total { get; set; }
+    [JsonPropertyName("last_seen_at")] public string? LastSeenAt { get; set; }
+}
+
+public sealed class AuditEventDto
+{
+    [JsonPropertyName("cab_id")] public long CabId { get; set; }
+    [JsonPropertyName("estado")] public string? Estado { get; set; }
+    [JsonPropertyName("mesa")] public string? Mesa { get; set; }
+    [JsonPropertyName("mesa_numero")] public int MesaNumero { get; set; }
+    [JsonPropertyName("zona")] public string? Zona { get; set; }
+    [JsonPropertyName("hora")] public string? Hora { get; set; }
+    [JsonPropertyName("numdoc")] public string? Numdoc { get; set; }
     [JsonPropertyName("total")] public decimal Total { get; set; }
     [JsonPropertyName("last_seen_at")] public string? LastSeenAt { get; set; }
 }
