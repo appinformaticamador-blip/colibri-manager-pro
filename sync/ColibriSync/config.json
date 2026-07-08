@@ -1,9 +1,0 @@
-{
-  "numier_path": "C:\\NUMIER\\DATOS",
-  "cabecera_file": "cabecera.DBF",
-  "detalle_file": "detalle.DBF",
-  "supabase_url": "https://xccyaoziutlxxklcofrw.supabase.co",
-  "supabase_anon_key": "PEGA_AQUI_TU_ANON_KEY",
-  "auto_sync_seconds": 60,
-  "batch_size": 500
-}

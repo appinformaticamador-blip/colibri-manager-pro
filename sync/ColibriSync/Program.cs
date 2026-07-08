@@ -52,7 +52,7 @@ public sealed class ColibriSyncApp
 
     private void Header()
     {
-        Console.WriteLine("🐦 Colibrí Sync 2.4 - NUMIER LIVE + progreso → Supabase");
+        Console.WriteLine("🐦 Colibrí Engine 3.0.2 - NUMIER LIVE + Estado del Servicio");
         Console.WriteLine("------------------------------------------------");
         Console.WriteLine($"Empresa: {_config.BusinessName}");
         Console.WriteLine($"Ruta NUMIER: {_config.NumierPath}");
@@ -103,6 +103,56 @@ public sealed class ColibriSyncApp
             Log("Campos detalle: " + string.Join(", ", detDbf.Fields.Select(f => $"{f.Name}:{f.Type}")));
             if (artDbf != null) Log("Campos artículos: " + string.Join(", ", artDbf.Fields.Select(f => $"{f.Name}:{f.Type}")));
         }
+
+        // Estado del Servicio LIVE: leer cuentas abiertas (CAB_ESTADO = P)
+        var openAccounts = new List<OpenAccountDto>();
+        var openIds = new HashSet<long>();
+        foreach (var rec in cabDbf.Records())
+        {
+            long cabId = rec.GetLong("CAB_ID");
+            string estado = FirstNonEmpty(rec.GetString("CAB_ESTADO"), rec.GetString("CAB_EST"));
+            if (!estado.Equals("P", StringComparison.OrdinalIgnoreCase)) continue;
+
+            var fecha = rec.GetDate("CAB_FECHA") ?? DateTime.Today;
+            var hora = rec.GetVfpDateTime("CAB_HORA") ?? fecha;
+            string mesaRaw = FirstNonEmpty(rec.GetString("CAB_MESA"), rec.GetString("CABMESA"), rec.GetString("MESA"));
+            int mesaNum = ParseMesa(mesaRaw);
+            string zona = ZoneForMesa(mesaNum);
+            decimal totalCab = FirstDecimal(rec, new [] { "CAB_TOTAL", "CAB_TOT", "CAB_IMPOR", "CAB_IMPORTE", "TOTAL" });
+            string numdoc = FirstNonEmpty(rec.GetString("CAB_NUMDOC"), rec.GetString("NUMDOC"));
+
+            openIds.Add(cabId);
+            openAccounts.Add(new OpenAccountDto
+            {
+                CabId = cabId,
+                Mesa = mesaRaw,
+                MesaNumero = mesaNum,
+                Zona = zona,
+                OpenedAt = hora.ToUniversalTime().ToString("O"),
+                Numdoc = numdoc,
+                Status = estado,
+                Total = totalCab,
+                LastSeenAt = DateTime.UtcNow.ToString("O")
+            });
+        }
+
+        if (openAccounts.Count > 0)
+        {
+            var openTotals = new Dictionary<long, decimal>();
+            foreach (var r in detDbf.Records())
+            {
+                long cabId = r.GetLong("DET_ID");
+                if (!openIds.Contains(cabId)) continue;
+                openTotals[cabId] = openTotals.GetValueOrDefault(cabId) + r.GetDecimal("DET_IMPORT");
+            }
+            foreach (var oa in openAccounts)
+            {
+                if (oa.Total <= 0 && openTotals.TryGetValue(oa.CabId, out var tv)) oa.Total = tv;
+            }
+        }
+        await api.UpsertOpenAccountsAsync(openAccounts);
+        await api.MarkOpenAccountsSnapshotAsync();
+        Log($"Estado del servicio: {openAccounts.Count:N0} cuentas abiertas. Pendiente: {openAccounts.Sum(o=>o.Total):N2} €");
 
         var newTickets = new List<TicketDto>();
         long maxCabSeen = lastCabId;
@@ -273,6 +323,30 @@ public sealed class ColibriSyncApp
         return null;
     }
 
+
+    private static int ParseMesa(string mesaRaw)
+    {
+        var s = new string((mesaRaw ?? "").Where(char.IsDigit).ToArray());
+        return int.TryParse(s, out var n) ? n : 0;
+    }
+
+    private static string ZoneForMesa(int mesa)
+    {
+        if (mesa >= 0 && mesa <= 19) return "terraza";
+        if (mesa >= 20 && mesa <= 30) return "salon";
+        return "barra";
+    }
+
+    private static decimal FirstDecimal(DbfRecord rec, string[] names)
+    {
+        foreach (var n in names)
+        {
+            var v = rec.GetDecimal(n);
+            if (v != 0) return v;
+        }
+        return 0;
+    }
+
     private static string ArticleName(Dictionary<string, ArticleDto> map, string code, string fallback)
     {
         code = (code ?? "").Trim();
@@ -385,6 +459,12 @@ public sealed class SupabaseRest : IDisposable
     public async Task UpsertTicketsAsync(IEnumerable<TicketDto> rows) => await Upsert("numier_tickets", "cab_id", rows);
     public async Task UpsertLinesAsync(IEnumerable<TicketLineDto> rows) => await Upsert("numier_ticket_lines", "line_key", rows);
     public async Task UpsertArticlesAsync(IEnumerable<ArticleDto> rows) => await Upsert("numier_articles", "article_code", rows);
+    public async Task UpsertOpenAccountsAsync(IEnumerable<OpenAccountDto> rows) => await Upsert("numier_open_accounts", "cab_id", rows);
+    public async Task MarkOpenAccountsSnapshotAsync()
+    {
+        var row = new[] { new ServiceStatusDto { StatusKey = "service", UpdatedAt = DateTime.UtcNow.ToString("O") } };
+        await Upsert("numier_service_status", "status_key", row);
+    }
     public async Task UpsertSyncFileAsync(string fileName, long size, DateTime modifiedUtc)
     {
         var row = new[] { new SyncFileDto { Source = "numier", FileName = fileName, FileSize = size, ModifiedAt = modifiedUtc.ToString("O"), SyncedAt = DateTime.UtcNow.ToString("O") } };
@@ -444,6 +524,23 @@ public sealed class TicketLineDto
     [JsonPropertyName("precio")] public decimal Precio { get; set; }
     [JsonPropertyName("importe")] public decimal Importe { get; set; }
     [JsonPropertyName("iva")] public decimal Iva { get; set; }
+}
+public sealed class OpenAccountDto
+{
+    [JsonPropertyName("cab_id")] public long CabId { get; set; }
+    [JsonPropertyName("mesa")] public string? Mesa { get; set; }
+    [JsonPropertyName("mesa_numero")] public int MesaNumero { get; set; }
+    [JsonPropertyName("zona")] public string? Zona { get; set; }
+    [JsonPropertyName("opened_at")] public string? OpenedAt { get; set; }
+    [JsonPropertyName("numdoc")] public string? Numdoc { get; set; }
+    [JsonPropertyName("status")] public string? Status { get; set; }
+    [JsonPropertyName("total")] public decimal Total { get; set; }
+    [JsonPropertyName("last_seen_at")] public string? LastSeenAt { get; set; }
+}
+public sealed class ServiceStatusDto
+{
+    [JsonPropertyName("status_key")] public string StatusKey { get; set; } = "service";
+    [JsonPropertyName("updated_at")] public string? UpdatedAt { get; set; }
 }
 public sealed class SyncFileDto
 {
