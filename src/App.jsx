@@ -476,17 +476,30 @@ function Schedule(){
   });
  }
  async function loadEmployeesFromSupabase(existing=[]){
-  const base=normalizeEmployees([]);
-  if(!supabase)return normalizeEmployees([...base,...existing]);
+  const fallback=normalizeEmployees([...baseEmployees,...existing]);
+  if(!supabase)return fallback;
   try{
-   const {data,error}=await supabase.from('employees').select('*').order('name');
+   const {data,error}=await supabase.from('employees').select('*').eq('active',true).order('name');
    if(error)throw error;
-   const remote=(data||[]).filter(e=>(e?.active!==false)&&(e?.name||e?.employee_name||e?.nombre)).map((e,i)=>{
-    const label=e.name||e.employee_name||e.nombre;
-    return {id:slugName(label)||String(e.id),name:label,category:e.role||e.category||e.position||'Sala',color:e.color||EMP_COLORS[(base.length+i)%EMP_COLORS.length],active:e.active,can_clock:e.can_clock};
+   const remote=(data||[]).filter(e=>(e?.name||e?.employee_name||e?.nombre)).map((e,i)=>{
+    const label=String(e.name||e.employee_name||e.nombre||'').trim();
+    const id=slugName(label)||String(e.id);
+    return {
+     id,
+     name:label.toUpperCase(),
+     category:e.category||e.position||(e.role==='empleado'?'Sala':e.role)||'Sala',
+     color:e.color||EMP_COLORS[i%EMP_COLORS.length],
+     active:true,
+     can_clock:e.can_clock!==false
+    };
    });
-   return normalizeEmployees([...base,...remote]);
-  }catch(e){console.warn('No se pudo cargar empleados desde Supabase',e);return normalizeEmployees([...base,...existing]);}
+   // Regla ERP: si existen empleados en el módulo Empleados, Cuadrantes usa ESA lista como fuente única.
+   // Si todavía no hay empleados dados de alta, usa la plantilla base para no dejar el módulo vacío.
+   return remote.length?normalizeEmployees(remote):fallback;
+  }catch(e){
+   console.warn('No se pudo cargar empleados desde Supabase',e);
+   return fallback;
+  }
  }
  function cleanWeek(src){const w=emptyWeek();DAYS.forEach(d=>SLOTS.forEach(s=>{const arr=src?.[d]?.[s];if(Array.isArray(arr)&&arr.includes(CLOSED_ID)){w[d][s]=[CLOSED_ID];return;}w[d][s]=Array.isArray(arr)?[...new Set(arr.filter(Boolean).map(normalizeEmployeeId).filter(id=>id!==CLOSED_ID))].slice(0,MAX_PER_SLOT):[]}));return w}
  function parseJSON(key,fallback){try{const raw=localStorage.getItem(key);if(!raw)return fallback;const val=JSON.parse(raw);return val||fallback}catch{return fallback}}

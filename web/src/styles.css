@@ -5,3 +5,24 @@
 .scheduleFresh .scheduleTopButtons{display:block!important;background:#f2fffb!important;border:2px solid #11b99e!important;border-radius:22px!important;padding:16px!important;margin-bottom:20px!important;position:relative!important;z-index:20!important}
 .scheduleFresh .scheduleTopButtons h2{margin:0;color:#073b35;font-size:28px}.scheduleFresh .scheduleTopButtons p{margin:5px 0 12px;color:#5b756f;font-weight:700}.scheduleFresh .scheduleActionGrid{display:grid!important;grid-template-columns:repeat(auto-fit,minmax(170px,1fr))!important;gap:10px!important;margin:10px 0!important}.scheduleFresh .scheduleActionGrid button{display:block!important;width:100%!important;min-height:46px!important;border-radius:14px!important}.scheduleFresh .copyDayBox{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px}.scheduleFresh .copyDayBox select{width:auto;min-width:160px}.scheduleFresh .copyDayBox span{font-size:24px;font-weight:900;color:#073b35}.scheduleFresh .warnBox{background:#fff7ed;border:1px solid #fed7aa;color:#9a3412;border-radius:16px;padding:12px;margin:12px 0;font-weight:900}.scheduleFresh .scheduleVersion{font-size:22px;background:#0b4d43;color:white;border-radius:999px;padding:10px 14px}.scheduleFresh .shiftCell{min-width:132px;height:82px}.scheduleFresh .badge{font-size:14px;padding:6px 8px;margin:3px 0}.scheduleFresh .emptyShift{opacity:.8}
 @media(max-width:800px){.scheduleFresh .scheduleTopButtons{padding:14px!important;margin-bottom:18px!important}.scheduleFresh .scheduleTopButtons h2{font-size:24px}.scheduleFresh .scheduleActionGrid{grid-template-columns:1fr!important}.scheduleFresh .copyDayBox{display:grid!important;grid-template-columns:1fr!important}.scheduleFresh .copyDayBox select,.scheduleFresh .copyDayBox button{width:100%!important}.scheduleFresh .copyDayBox span{display:none}.scheduleFresh .scheduleTitleBar{display:block!important}.scheduleFresh .scheduleTitleBar h2{font-size:28px}.scheduleFresh .scheduleWrap{overflow-x:auto!important;-webkit-overflow-scrolling:touch!important;border:1px solid #dcefeb;border-radius:18px}.scheduleFresh .schedulePro{min-width:1000px!important}.scheduleFresh .shiftCell{height:90px!important}.scheduleFresh .employeeChips{display:grid!important;grid-template-columns:1fr!important}.scheduleFresh textarea{font-size:14px}}
+
+
+/* RC 3.3.8 - Corrección definitiva layout modal + empleados fuente única */
+.scheduleFresh .scheduleTopButtons{position:relative!important;top:auto!important;z-index:1!important}
+.modal{position:fixed!important;inset:0!important;z-index:99999!important;background:rgba(0,0,0,.62)!important;display:flex!important;align-items:center!important;justify-content:center!important;padding:24px!important;box-sizing:border-box!important;overflow:auto!important}
+.scheduleModal{position:relative!important;z-index:100000!important;width:min(920px,94vw)!important;max-height:86vh!important;overflow:auto!important;margin:auto!important}
+.scheduleModal .empGrid{display:grid!important;grid-template-columns:repeat(auto-fit,minmax(220px,1fr))!important;gap:12px!important}
+.scheduleModal .empbtn{min-height:64px!important;display:grid!important;grid-template-columns:28px 1fr auto!important;align-items:center!important;gap:10px!important}
+.scheduleModal .empbtn b{text-transform:uppercase!important}
+.scheduleModal .empbtn small{font-weight:800!important;opacity:.8!important}
+.scheduleModal .closedOption{grid-column:1/-1!important;background:#000!important;color:#fff!important}
+.scheduleModal .closedOption .sq{background:#000!important;border:2px solid #fff!important}
+body:has(.modal){overflow:hidden!important}
+.schedulePage{isolation:isolate!important}
+@media(max-width:800px){
+ .modal{align-items:flex-start!important;justify-content:center!important;padding:18px!important;padding-top:28px!important}
+ .scheduleModal{width:94vw!important;max-height:88vh!important;padding:18px!important;border-radius:24px!important}
+ .scheduleModal .empGrid{grid-template-columns:1fr!important}
+ .scheduleModal h2{font-size:28px!important;line-height:1.1!important}
+ .scheduleModal .empbtn{min-height:58px!important}
+}
