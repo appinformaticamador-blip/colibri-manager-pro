@@ -453,6 +453,7 @@ function Schedule(){
  const [targetDay,setTargetDay]=useState('Martes');
  const [dragItem,setDragItem]=useState(null);
  const [copyItem,setCopyItem]=useState(null);
+ const [touchHint,setTouchHint]=useState('');
  const [syncState,setSyncState]=useState(supabase?'cargando':'sin_supabase');
  const [saving,setSaving]=useState(false);
  const [loadError,setLoadError]=useState('');
@@ -519,8 +520,36 @@ function Schedule(){
  async function duplicateNextWeek(){const nextId=shiftWeek(weekId,1);await saveWeek(nextId,weekData);setWeekId(nextId);alert('Duplicada a la semana siguiente')}
  function copyDay(){if(sourceDay===targetDay)return;const w=cleanWeek(weekData);SLOTS.forEach(s=>w[targetDay][s]=[...(w[sourceDay][s]||[])]);saveWeek(weekId,w);alert(`${sourceDay} copiado a ${targetDay}`)}
  function quickCopy(a,b){const w=cleanWeek(weekData);SLOTS.forEach(s=>w[b][s]=[...(w[a][s]||[])]);saveWeek(weekId,w)}
- function copyDrag(day,slot){if(!dragItem)return;const w=cleanWeek(weekData);const dest=w[day][slot]||[];if(!dest.includes(dragItem.id)&&dest.length<3)dest.push(dragItem.id);w[day][slot]=dest.slice(0,3);saveWeek(weekId,w);setDragItem(null)}
- function copyEmployeeToCell(day,slot){if(!copyItem)return false;const w=cleanWeek(weekData);const dest=w[day][slot]||[];if(!dest.includes(copyItem.id)&&dest.length<3){dest.push(copyItem.id);w[day][slot]=dest.slice(0,3);saveWeek(weekId,w)}setCopyItem(null);return true}
+ function addEmployeeToCell(employeeId,day,slot){
+  if(!employeeId)return false;
+  const w=cleanWeek(weekData);
+  const dest=Array.isArray(w[day][slot])?w[day][slot]:[];
+  if(dest.includes(employeeId)){setTouchHint('Ese empleado ya está en esa franja');return true}
+  if(dest.length>=3){setTouchHint('Máximo 3 empleados por franja');return true}
+  dest.push(employeeId);
+  w[day][slot]=dest.slice(0,3);
+  saveWeek(weekId,w);
+  setTouchHint(`${empById(employeeId).name} copiado a ${day} ${slot}`);
+  return true;
+ }
+ function startCopyEmployee(id,day,slot){
+  setCopyItem({id,day,slot});
+  setTouchHint(`Copiando ${empById(id).name}. Toca otra celda para duplicarlo.`);
+ }
+ function copyDrag(day,slot,event){
+  event?.preventDefault?.();
+  let item=dragItem;
+  try{const raw=event?.dataTransfer?.getData('application/json')||event?.dataTransfer?.getData('text/plain');if(raw)item=JSON.parse(raw)}catch{}
+  if(!item?.id)return;
+  addEmployeeToCell(item.id,day,slot);
+  setDragItem(null);
+ }
+ function copyEmployeeToCell(day,slot){
+  if(!copyItem)return false;
+  addEmployeeToCell(copyItem.id,day,slot);
+  setCopyItem(null);
+  return true;
+ }
  const totals=useMemo(()=>{const t={};DAYS.forEach(d=>SLOTS.forEach(s=>getCell(d,s).forEach(id=>t[id]=(t[id]||0)+h(s))));return t},[weekData,employees]);
  const totalHours=Object.values(totals).reduce((a,b)=>a+b,0);
  const warnings=employees.filter(e=>totals[e.id]>40).map(e=>`${e.name} supera 40 h`);
@@ -542,10 +571,11 @@ function Schedule(){
    <div className="quickCopyDays"><b>Copias rápidas:</b>{DAYS.slice(0,-1).map((d,i)=><button key={d} onClick={()=>quickCopy(d,DAYS[i+1])}>{d} → {DAYS[i+1]}</button>)}</div>
   </div>
   <div className="card mainScheduleCard scheduleCard" id="printSchedule">
-   <div className="row between scheduleTitleBar"><div><h2>Cuadrante semanal {weekId}</h2><p className="mutedText">Fuente única: Supabase. En PC arrastra para copiar. En móvil toca un empleado y luego toca otra celda para copiarlo.</p></div><b className="scheduleVersion">{totalHours.toFixed(1)} h</b></div>
+   <div className="row between scheduleTitleBar"><div><h2>Cuadrante semanal {weekId}</h2><p className="mutedText">Fuente única: Supabase. En PC arrastra una etiqueta para DUPLICARLA en otra franja. En móvil toca un empleado y luego toca la celda destino.</p></div><b className="scheduleVersion">{totalHours.toFixed(1)} h</b></div>
    {warnings.length>0&&<div className="warnBox">{warnings.join(' · ')}</div>}
-   {copyItem&&<div className="copyModeBox">Copiando <b>{empById(copyItem.id).name}</b>. Toca una celda destino para pegarlo. <button onClick={()=>setCopyItem(null)}>Cancelar</button></div>}
-   <div className="scheduleWrap"><table className="schedulePro"><thead><tr><th>Hora</th>{DAYS.map(d=><th key={d}>{d}</th>)}</tr></thead><tbody>{SLOTS.map(slot=><tr key={slot}><td className="slotHour">{slot}</td>{DAYS.map(day=><td key={day+slot} className={(copyItem?'shiftCell copyReady':'shiftCell')} onClick={()=>{if(!copyEmployeeToCell(day,slot))setSelected({day,slot})}} onDragOver={e=>e.preventDefault()} onDrop={()=>copyDrag(day,slot)}>{getCell(day,slot).length===0&&<span className="emptyShift">+ añadir</span>}{getCell(day,slot).map(id=>{const emp=empById(id);return <span key={id} draggable className="badge" style={{background:emp.color,color:emp.color==='#ffee58'?'#073b35':'white'}} onClick={e=>{e.stopPropagation();setCopyItem({id,day,slot});}} onDoubleClick={e=>{e.stopPropagation();setSelected({day,slot})}} onDragStart={e=>{e.stopPropagation();setDragItem({id,day,slot})}}>{emp.name}</span>})}</td>)}</tr>)}</tbody></table></div>
+   {copyItem&&<div className="copyModeBox">📋 Copiando <b>{empById(copyItem.id).name}</b>. Toca una celda destino para duplicarlo. <button onClick={()=>{setCopyItem(null);setTouchHint('')}}>Cancelar</button></div>}
+   {touchHint&&<div className="copyModeBox soft">{touchHint}</div>}
+   <div className="scheduleWrap"><table className="schedulePro"><thead><tr><th>Hora</th>{DAYS.map(d=><th key={d}>{d}</th>)}</tr></thead><tbody>{SLOTS.map(slot=><tr key={slot}><td className="slotHour">{slot}</td>{DAYS.map(day=><td key={day+slot} className={(copyItem?'shiftCell copyReady':'shiftCell')} onClick={()=>{if(!copyEmployeeToCell(day,slot))setSelected({day,slot})}} onDragOver={e=>{e.preventDefault();e.dataTransfer.dropEffect='copy'}} onDrop={e=>copyDrag(day,slot,e)}>{getCell(day,slot).length===0&&<span className="emptyShift">+ añadir</span>}{getCell(day,slot).map(id=>{const emp=empById(id);return <span key={id} draggable className="badge" style={{background:emp.color,color:emp.color==='#ffee58'?'#073b35':'white'}} title="Arrastra para duplicar. En móvil toca y luego toca destino." onClick={e=>{e.stopPropagation();startCopyEmployee(id,day,slot);}} onTouchStart={e=>{e.stopPropagation();startCopyEmployee(id,day,slot);}} onDoubleClick={e=>{e.stopPropagation();setSelected({day,slot})}} onDragStart={e=>{e.stopPropagation();const item={id,day,slot};setDragItem(item);e.dataTransfer.effectAllowed='copy';e.dataTransfer.setData('application/json',JSON.stringify(item));e.dataTransfer.setData('text/plain',JSON.stringify(item));}} onDragEnd={()=>setDragItem(null)}>{emp.name}</span>})}</td>)}</tr>)}</tbody></table></div>
    <div className="employeeSummary">{employees.map(e=><div key={e.id}><span className="sq" style={{background:e.color}}></span><b>{e.name}</b><em>{(totals[e.id]||0).toFixed(1)} h</em></div>)}</div>
    <textarea value={buildWhatsApp()} readOnly rows={10}/>
   </div>
