@@ -433,48 +433,60 @@ function Schedule(){
  const RESTAURANT_ID='colibri';
  const STORAGE='colibriCuadrantesRC332_CACHE';
  const baseEmployees=[
-  {id:'alfonso',name:'Alfonso',category:'Gerencia',color:'#5f8791'},
-  {id:'alvaro',name:'Álvaro',category:'Sala',color:'#66bb6a'},
-  {id:'jose',name:'Jose',category:'Barra',color:'#ffa726'},
-  {id:'kathy',name:'Kathy',category:'Sala',color:'#ec407a'},
-  {id:'orlando',name:'Orlando',category:'Sala',color:'#ab47bc'},
-  {id:'pablo',name:'Pablo',category:'Sala',color:'#ffee58'},
-  {id:'sonia',name:'Sonia',category:'Sala',color:'#29b6f6'}
+  {id:'alfonso',name:'ALFONSO',category:'Gerencia',color:'#5f8791'},
+  {id:'sonia',name:'SONIA',category:'Sala',color:'#29b6f6'},
+  {id:'alvaro',name:'ALVARO',category:'Sala',color:'#66bb6a'},
+  {id:'jose',name:'JOSE',category:'Barra',color:'#ffa726'},
+  {id:'kathy',name:'KATHY',category:'Sala',color:'#ec407a'},
+  {id:'orlando',name:'ORLANDO',category:'Sala',color:'#ab47bc'},
+  {id:'pablo',name:'PABLO',category:'Sala',color:'#ffee58'},
+  {id:'prueba',name:'PRUEBA',category:'Refuerzo',color:'#26c6da'}
  ];
  function emptyWeek(){const w={};DAYS.forEach(d=>{w[d]={};SLOTS.forEach(s=>w[d][s]=[])});return w}
  function slugName(name){return String(name||'').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'')}
  function normalizeEmployeeId(id){return id==='ivan'?'kathy':id}
  function normalizeEmployees(list){
-  const source=Array.isArray(list)&&list.length?list:baseEmployees;
+  const source=Array.isArray(list)?list:[];
   const byKey=new Map();
+  const blocked=new Set(['ivan','javi']);
   const put=(raw,i)=>{
    if(!raw)return;
-   const rawName=String(raw.name||raw.employee_name||raw.id||'').trim();
+   const rawName=String(raw.name||raw.employee_name||raw.nombre||raw.id||'').trim();
    const nameKey=slugName(rawName);
    let id=normalizeEmployeeId(String(raw.id||nameKey||'').trim());
-   const oldName=rawName.toLowerCase();
+   const idKey=slugName(id);
+   if(blocked.has(nameKey)||blocked.has(idKey))return;
    let name=rawName||id;
-   let category=raw.category||raw.role||'Sala';
+   let category=raw.category||raw.role||raw.position||'Sala';
    let color=raw.color||EMP_COLORS[i%EMP_COLORS.length];
-   if(id==='ivan'||nameKey==='ivan'||oldName.includes('iván')||oldName.includes('ivan')){id='kathy';name='Kathy';category=category==='Cocina'?'Sala':category;color=color||'#ec407a'}
    if(!id)return;
+   id=slugName(id)||slugName(name);
+   name=String(name).trim().toUpperCase();
    const key=slugName(name)||id;
    const fixed={id,name,category,color,active:raw.active!==false,can_clock:raw.can_clock!==false};
    byKey.set(key,{...(byKey.get(key)||{}),...fixed});
   };
   baseEmployees.forEach(put);
   source.forEach(put);
-  return [...byKey.values()].filter(e=>e.active!==false);
+  return [...byKey.values()].filter(e=>e.active!==false).sort((a,b)=>{
+   const order=baseEmployees.map(x=>x.id);
+   const ia=order.indexOf(a.id),ib=order.indexOf(b.id);
+   if(ia!==-1||ib!==-1)return (ia===-1?999:ia)-(ib===-1?999:ib);
+   return a.name.localeCompare(b.name,'es');
+  });
  }
  async function loadEmployeesFromSupabase(existing=[]){
-  const base=normalizeEmployees(existing);
-  if(!supabase)return base;
+  const base=normalizeEmployees([]);
+  if(!supabase)return normalizeEmployees([...base,...existing]);
   try{
-   const {data,error}=await supabase.from('employees').select('id,name,role,color,active,can_clock').eq('active',true).order('name');
+   const {data,error}=await supabase.from('employees').select('*').order('name');
    if(error)throw error;
-   const remote=(data||[]).filter(e=>e?.name).map((e,i)=>({id:slugName(e.name)||String(e.id),name:e.name,category:e.role||'Sala',color:e.color||EMP_COLORS[(base.length+i)%EMP_COLORS.length],active:e.active,can_clock:e.can_clock}));
+   const remote=(data||[]).filter(e=>(e?.active!==false)&&(e?.name||e?.employee_name||e?.nombre)).map((e,i)=>{
+    const label=e.name||e.employee_name||e.nombre;
+    return {id:slugName(label)||String(e.id),name:label,category:e.role||e.category||e.position||'Sala',color:e.color||EMP_COLORS[(base.length+i)%EMP_COLORS.length],active:e.active,can_clock:e.can_clock};
+   });
    return normalizeEmployees([...base,...remote]);
-  }catch(e){console.warn('No se pudo cargar empleados desde Supabase',e);return base;}
+  }catch(e){console.warn('No se pudo cargar empleados desde Supabase',e);return normalizeEmployees([...base,...existing]);}
  }
  function cleanWeek(src){const w=emptyWeek();DAYS.forEach(d=>SLOTS.forEach(s=>{const arr=src?.[d]?.[s];if(Array.isArray(arr)&&arr.includes(CLOSED_ID)){w[d][s]=[CLOSED_ID];return;}w[d][s]=Array.isArray(arr)?[...new Set(arr.filter(Boolean).map(normalizeEmployeeId).filter(id=>id!==CLOSED_ID))].slice(0,MAX_PER_SLOT):[]}));return w}
  function parseJSON(key,fallback){try{const raw=localStorage.getItem(key);if(!raw)return fallback;const val=JSON.parse(raw);return val||fallback}catch{return fallback}}
@@ -516,20 +528,20 @@ function Schedule(){
    if(error)throw error;
    if(data){
     const next=cleanWeek(data.data||{});
-    const emps=await loadEmployeesFromSupabase(data.employees);
+    const emps=await loadEmployeesFromSupabase([]);
     setWeekData(next);setEmployees(emps);setRevision(Number(data.revision||0));
     localStorage.setItem(cacheKey(id),JSON.stringify({data:next,employees:emps,revision:Number(data.revision||0)}));
    }else{
     const cached=parseJSON(cacheKey(id),null);
-    if(cached?.data){setWeekData(cleanWeek(cached.data));setEmployees(await loadEmployeesFromSupabase(cached.employees))}
-    else {setWeekData(emptyWeek());setEmployees(await loadEmployeesFromSupabase(baseEmployees))}
+    if(cached?.data){setWeekData(cleanWeek(cached.data));setEmployees(await loadEmployeesFromSupabase([]))}
+    else {setWeekData(emptyWeek());setEmployees(await loadEmployeesFromSupabase([]))}
     setRevision(0);
    }
    setSyncState('supabase');setLastSaved(new Date().toLocaleTimeString('es-ES'));
   }catch(e){
    setSyncState('error_supabase');setLoadError(e?.message||String(e));
    const cached=parseJSON(cacheKey(id),{data:emptyWeek(),employees:baseEmployees});
-   setWeekData(cleanWeek(cached.data||cached));setEmployees(await loadEmployeesFromSupabase(cached.employees));
+   setWeekData(cleanWeek(cached.data||cached));setEmployees(await loadEmployeesFromSupabase([]));
   }finally{setLoaded(true)}
  }
  async function saveWeek(id,nextWeek,nextEmployees=employees){
@@ -614,7 +626,7 @@ function Schedule(){
  function buildWhatsApp(){let out=`📅 BRASERÍA EL COLIBRÍ\nCUADRANTE SEMANA ${weekId}\n\n`;DAYS.forEach(day=>{out+=`━━━━━━━━━━━━━━\n🟢 ${day.toUpperCase()}\n`;let any=false;SLOTS.forEach(slot=>{const cell=getCell(day,slot);if(cell.includes(CLOSED_ID)){any=true;out+=`\n${slot}\nCERRADO\n`;return;}const names=cell.filter(id=>id!==CLOSED_ID).map(id=>`• ${empById(id).name}`);if(names.length){any=true;out+=`\n${slot}\n${names.join('\n')}\n`}});if(!any)out+='Sin turnos asignados\n';out+='\n'});out+='━━━━━━━━━━━━━━\nHORAS SEMANALES\n';employees.filter(e=>totals[e.id]).forEach(e=>out+=`${e.name}: ${totals[e.id].toFixed(1)} h\n`);return out}
  async function copyWhatsApp(){try{await navigator.clipboard.writeText(buildWhatsApp());alert('Texto copiado para WhatsApp')}catch{prompt('Copia el texto:',buildWhatsApp())}}
  function downloadText(){const blob=new Blob([buildWhatsApp()],{type:'text/plain;charset=utf-8'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`cuadrante_${weekId}.txt`;a.click();URL.revokeObjectURL(a.href)}
- async function exportImage(){const cw=1500,ch=980;const canvas=document.createElement('canvas');canvas.width=cw;canvas.height=ch;const ctx=canvas.getContext('2d');ctx.fillStyle='#fff';ctx.fillRect(0,0,cw,ch);ctx.fillStyle='#073b35';ctx.font='bold 42px Arial';ctx.fillText(`Cuadrante semanal ${weekId}`,40,55);ctx.font='24px Arial';ctx.fillText('Brasería El Colibrí',40,90);const colW=(cw-80)/8,rowH=86,y0=120;ctx.font='bold 18px Arial';['Hora',...DAYS].forEach((t,i)=>{ctx.fillStyle='#0b4d43';ctx.fillRect(40+i*colW,y0,colW-6,36);ctx.fillStyle='white';ctx.fillText(t,52+i*colW,y0+25)});SLOTS.forEach((slot,r)=>{const y=y0+44+r*rowH;ctx.fillStyle='#eef9f6';ctx.fillRect(40,y,colW-6,rowH-8);ctx.fillStyle='#073b35';ctx.font='bold 20px Arial';ctx.fillText(slot,52,y+42);DAYS.forEach((d,di)=>{const x=40+(di+1)*colW;ctx.fillStyle='#103f38';ctx.fillRect(x,y,colW-6,rowH-8);getCell(d,slot).forEach((id,idx)=>{const emp=empById(id);ctx.fillStyle=emp.color;ctx.fillRect(x+10,y+10+idx*22,colW-26,18);ctx.fillStyle='white';ctx.font='bold 14px Arial';ctx.fillText(emp.name,x+16,y+24+idx*22)})})});canvas.toBlob(b=>{const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=`cuadrante_${weekId}.png`;a.click();URL.revokeObjectURL(a.href)})}
+ async function exportImage(){const cw=1500,ch=980;const canvas=document.createElement('canvas');canvas.width=cw;canvas.height=ch;const ctx=canvas.getContext('2d');ctx.fillStyle='#fff';ctx.fillRect(0,0,cw,ch);ctx.fillStyle='#073b35';ctx.font='bold 42px Arial';ctx.fillText(`Cuadrante semanal ${weekId}`,40,55);ctx.font='24px Arial';ctx.fillText('Brasería El Colibrí',40,90);const colW=(cw-80)/8,rowH=86,y0=120;ctx.font='bold 18px Arial';['Hora',...DAYS].forEach((t,i)=>{ctx.fillStyle='#0b4d43';ctx.fillRect(40+i*colW,y0,colW-6,36);ctx.fillStyle='white';ctx.fillText(t,52+i*colW,y0+25)});SLOTS.forEach((slot,r)=>{const y=y0+44+r*rowH;ctx.fillStyle='#eef9f6';ctx.fillRect(40,y,colW-6,rowH-8);ctx.fillStyle='#073b35';ctx.font='bold 20px Arial';ctx.fillText(slot,52,y+42);DAYS.forEach((d,di)=>{const x=40+(di+1)*colW;const cell=getCell(d,slot);const closed=cell.includes(CLOSED_ID);ctx.fillStyle=closed?'#000000':'#103f38';ctx.fillRect(x,y,colW-6,rowH-8);if(closed){ctx.fillStyle='white';ctx.font='bold 18px Arial';ctx.fillText('CERRADO',x+16,y+42);return;}cell.filter(id=>id!==CLOSED_ID).forEach((id,idx)=>{const emp=empById(id);ctx.fillStyle=emp.color;ctx.fillRect(x+10,y+10+idx*22,colW-26,18);ctx.fillStyle='white';ctx.font='bold 14px Arial';ctx.fillText(emp.name,x+16,y+24+idx*22)})})});canvas.toBlob(b=>{const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=`cuadrante_${weekId}.png`;a.click();URL.revokeObjectURL(a.href)})}
  function exportPDF(){window.print()}
  if(!loaded)return <div className="card"><h2>Cargando cuadrante...</h2></div>;
  return <div className="schedulePage scheduleFresh">
