@@ -366,6 +366,8 @@ function SafeHotfixCard({icon,title,subtitle,children}){
 
 function scheduleKey(weekId,day,slot){return `${weekId}|${day}|${slot}`}
 function safeJSON(value,fallback){try{return JSON.parse(value)||fallback}catch{return fallback}}
+function asArray(value){return Array.isArray(value)?value:[]}
+function asObject(value){return value&&typeof value==='object'&&!Array.isArray(value)?value:{}}
 function parseWeekId(weekId){
  const m=String(weekId||'').match(/^(\d{4})-W(\d{1,2})$/);
  if(!m)return {year:new Date().getFullYear(),week:Number(String(week()).split('-W')[1]||1)};
@@ -392,13 +394,13 @@ function copyScheduleWeek(data,fromWeek,toWeek){
  DAYS.forEach(day=>SLOTS.forEach(slot=>{
   const fromKey=scheduleKey(fromWeek,day,slot);
   const toKey=scheduleKey(toWeek,day,slot);
-  if(data[fromKey]&&data[fromKey].length)nd[toKey]=data[fromKey].map(e=>({...e}));
+  if(asArray(data[fromKey]).length)nd[toKey]=asArray(data[fromKey]).map(e=>({...e}));
   else delete nd[toKey];
  }));
  return nd;
 }
 function hasScheduleWeek(data,weekId){
- return DAYS.some(day=>SLOTS.some(slot=>(data[scheduleKey(weekId,day,slot)]||[]).length));
+ return DAYS.some(day=>SLOTS.some(slot=>asArray(asObject(data)[scheduleKey(weekId,day,slot)]).length));
 }
 
 function employeeLabel(e){return e?.name||e?.employee_name||e?.nombre||`Empleado ${e?.id||''}`.trim()}
@@ -413,7 +415,7 @@ function mergeRanges(slots){
 }
 function buildScheduleSummary(data,weekId){
  const byEmp={};
- DAYS.forEach(day=>SLOTS.forEach(slot=>{(data[scheduleKey(weekId,day,slot)]||[]).forEach(e=>{const name=employeeLabel(e);byEmp[name]=byEmp[name]||{name,color:e.color||'#0b7f6d',days:{},hours:0};byEmp[name].days[day]=byEmp[name].days[day]||[];byEmp[name].days[day].push(slot);byEmp[name].hours+=h(slot);})}));
+ DAYS.forEach(day=>SLOTS.forEach(slot=>{asArray(asObject(data)[scheduleKey(weekId,day,slot)]).forEach(e=>{const name=employeeLabel(e);byEmp[name]=byEmp[name]||{name,color:e.color||'#0b7f6d',days:{},hours:0};byEmp[name].days[day]=byEmp[name].days[day]||[];byEmp[name].days[day].push(slot);byEmp[name].hours+=h(slot);})}));
  return Object.values(byEmp).sort((a,b)=>a.name.localeCompare(b.name,'es'));
 }
 function scheduleWhatsAppText(data,weekId){
@@ -428,18 +430,18 @@ function copyText(text){navigator.clipboard?.writeText(text).then(()=>alert('Tex
 function Schedule(){
  const currentWeek=week();
  const [weekId,setWeekId]=useState(currentWeek);
- const [data,setData]=useState(()=>safeJSON(localStorage.colibriSchedule,'{}'));
+ const [data,setData]=useState(()=>asObject(safeJSON(localStorage.colibriSchedule,{})));
  const [selected,setSelected]=useState(null);
- const [employees,setEmployees]=useState(()=>safeJSON(localStorage.colibriScheduleEmployees,'[]'));
+ const [employees,setEmployees]=useState(()=>asArray(safeJSON(localStorage.colibriScheduleEmployees,[])));
  const [manualName,setManualName]=useState('');
  const [manualCategory,setManualCategory]=useState('Sala');
  const [copySourceDay,setCopySourceDay]=useState('Lunes');
  const [copyTargetDay,setCopyTargetDay]=useState('Martes');
  const [drag,setDrag]=useState(null);
- useEffect(()=>{let alive=true;(async()=>{try{if(!supabase)return;const {data:rows}=await supabase.from('employees').select('*').eq('active',true).order('name',{ascending:true});if(!alive)return;const base=(rows||[]).map((e,i)=>({id:e.id||`emp_${i}`,name:employeeLabel(e),category:e.category||e.categoria||'Equipo',color:employeeColor(e,i)}));setEmployees(old=>{const manual=(old||[]).filter(e=>String(e.id||'').startsWith('manual_'));const merged=[...base,...manual];localStorage.colibriScheduleEmployees=JSON.stringify(merged);return merged})}catch{}})();return()=>{alive=false}},[]);
- function save(nd){setData(nd);localStorage.colibriSchedule=JSON.stringify(nd)}
- function saveEmployees(list){setEmployees(list);localStorage.colibriScheduleEmployees=JSON.stringify(list)}
- function cell(day,slot){return data[scheduleKey(weekId,day,slot)]||[]}
+ useEffect(()=>{let alive=true;(async()=>{try{if(!supabase)return;const {data:rows}=await supabase.from('employees').select('*').eq('active',true).order('name',{ascending:true});if(!alive)return;const base=asArray(rows).map((e,i)=>({id:e.id||`emp_${i}`,name:employeeLabel(e),category:e.category||e.categoria||'Equipo',color:employeeColor(e,i)}));setEmployees(old=>{const manual=asArray(old).filter(e=>String(e.id||'').startsWith('manual_'));const merged=[...base,...manual];localStorage.colibriScheduleEmployees=JSON.stringify(merged);return merged})}catch{}})();return()=>{alive=false}},[]);
+ function save(nd){const clean=asObject(nd);setData(clean);localStorage.colibriSchedule=JSON.stringify(clean)}
+ function saveEmployees(list){const clean=asArray(list);setEmployees(clean);localStorage.colibriScheduleEmployees=JSON.stringify(clean)}
+ function cell(day,slot){return asArray(asObject(data)[scheduleKey(weekId,day,slot)])}
  function empKey(emp){return emp.id||emp.name}
  function normalizeEmp(emp,i=0){return {id:empKey(emp),name:employeeLabel(emp),category:emp.category||'Equipo',color:emp.color||employeeColor(emp,i)}}
  function setCell(day,slot,arr){const k=scheduleKey(weekId,day,slot);const nd={...data};if(arr.length)nd[k]=arr.map(normalizeEmp);else delete nd[k];save(nd)}
@@ -470,7 +472,7 @@ function Schedule(){
       <h2>📅 Cuadrante semanal {weekId}</h2>
       <p>Herramientas de trabajo visibles siempre encima del cuadrante.</p>
      </div>
-     <b>Sprint 3.2.4</b>
+     <b>Sprint 3.2.6 estable</b>
     </div>
     <div className="scheduleActionGrid">
      <input value={weekId} onChange={e=>setWeekId(e.target.value)} title="Semana"/>
@@ -481,7 +483,7 @@ function Schedule(){
      <button onClick={duplicateToNextWeek}>Duplicar a semana siguiente</button>
      <button onClick={()=>copyText(whatsapp)}>Copiar WhatsApp</button>
      <button onClick={copyImage}>Copiar imagen</button>
-     <button className="red" onClick={clearWeek}>Vaciar semana</button>
+     <button className="red" onClick={clearWeek}>Vaciar semana</button><button className="red" onClick={()=>{localStorage.removeItem('colibriSchedule');localStorage.removeItem('colibriScheduleEmployees');location.reload()}}>Reiniciar cuadrantes</button>
     </div>
    </div>
    <div className="grid scheduleMiniTools">
@@ -494,8 +496,8 @@ function Schedule(){
    {summary.length===0?<p className="mutedText">Aún no hay empleados asignados.</p>:<div className="employeeSummary">{summary.map(emp=><div key={emp.name}><span className="sq" style={{background:emp.color}}/> <b>{emp.name}</b><em>{emp.hours.toFixed(1)} h</em></div>)}</div>}
    <h3>Texto listo para WhatsApp</h3><textarea readOnly rows="12" value={whatsapp} onFocus={e=>e.target.select()} />
   </div>
-  <div className="card employeeManager"><h3>Gestión rápida de empleados</h3><p className="mutedText">Los empleados de Supabase se cargan solos. También puedes añadir personal manual para cuadrantes.</p><div className="row"><input placeholder="Nombre empleado" value={manualName} onChange={e=>setManualName(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')addManual()}}/><select value={manualCategory} onChange={e=>setManualCategory(e.target.value)}><option>Sala</option><option>Barra</option><option>Cocina</option><option>Terraza</option><option>Extra</option></select><button onClick={addManual}>Añadir empleado</button></div><div className="employeeChips">{employees.map((e,i)=><span key={empKey(e)} className="employeeChip"><span className="sq" style={{background:e.color||employeeColor(e,i)}}/> <b>{employeeLabel(e)}</b><small>{e.category||'Equipo'}</small><button className="miniRed" onClick={()=>removeEmployee(e)}>×</button></span>)}</div></div>
-  {selected&&<div className="modal" onClick={()=>setSelected(null)}><div className="card scheduleModal" onClick={e=>e.stopPropagation()}><div className="row between"><h3>{selected.day} · {selected.slot}</h3><button className="red" onClick={()=>setSelected(null)}>Cerrar</button></div><p className="mutedText">Marca o desmarca empleados. Máximo 3 por franja.</p><div className="empGrid">{employees.map((e,i)=>{const active=cell(selected.day,selected.slot).some(x=>empKey(x)===empKey(e));return <button key={empKey(e)} className={active?'empbtn selected':'empbtn'} onClick={()=>toggle(e)}><span className="sq" style={{background:e.color||employeeColor(e,i)}}/> {employeeLabel(e)} <small>{e.category||'Equipo'}</small> {active?'✓':''}</button>})}</div><div className="row"><input placeholder="Empleado manual" value={manualName} onChange={e=>setManualName(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')addManual()}}/><select value={manualCategory} onChange={e=>setManualCategory(e.target.value)}><option>Sala</option><option>Barra</option><option>Cocina</option><option>Terraza</option><option>Extra</option></select><button onClick={addManual}>Añadir</button></div><button className="red" onClick={clearCell}>Vaciar esta franja</button></div></div>}
+  <div className="card employeeManager"><h3>Gestión rápida de empleados</h3><p className="mutedText">Los empleados de Supabase se cargan solos. También puedes añadir personal manual para cuadrantes.</p><div className="row"><input placeholder="Nombre empleado" value={manualName} onChange={e=>setManualName(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')addManual()}}/><select value={manualCategory} onChange={e=>setManualCategory(e.target.value)}><option>Sala</option><option>Barra</option><option>Cocina</option><option>Terraza</option><option>Extra</option></select><button onClick={addManual}>Añadir empleado</button></div><div className="employeeChips">{asArray(employees).map((e,i)=><span key={empKey(e)} className="employeeChip"><span className="sq" style={{background:e.color||employeeColor(e,i)}}/> <b>{employeeLabel(e)}</b><small>{e.category||'Equipo'}</small><button className="miniRed" onClick={()=>removeEmployee(e)}>×</button></span>)}</div></div>
+  {selected&&<div className="modal" onClick={()=>setSelected(null)}><div className="card scheduleModal" onClick={e=>e.stopPropagation()}><div className="row between"><h3>{selected.day} · {selected.slot}</h3><button className="red" onClick={()=>setSelected(null)}>Cerrar</button></div><p className="mutedText">Marca o desmarca empleados. Máximo 3 por franja.</p><div className="empGrid">{asArray(employees).map((e,i)=>{const active=cell(selected.day,selected.slot).some(x=>empKey(x)===empKey(e));return <button key={empKey(e)} className={active?'empbtn selected':'empbtn'} onClick={()=>toggle(e)}><span className="sq" style={{background:e.color||employeeColor(e,i)}}/> {employeeLabel(e)} <small>{e.category||'Equipo'}</small> {active?'✓':''}</button>})}</div><div className="row"><input placeholder="Empleado manual" value={manualName} onChange={e=>setManualName(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')addManual()}}/><select value={manualCategory} onChange={e=>setManualCategory(e.target.value)}><option>Sala</option><option>Barra</option><option>Cocina</option><option>Terraza</option><option>Extra</option></select><button onClick={addManual}>Añadir</button></div><button className="red" onClick={clearCell}>Vaciar esta franja</button></div></div>}
  </div>
 }
 function Compare(){const[text,setText]=useState('');const[name,setName]=useState('');function calc(){const clean=text.replace(/_/g,'');let total=0;for(const line of clean.split('\n')){const times=[...line.matchAll(/entrada\s*(\d{1,2}):(\d{2})\s*salida\s*(\d{1,2}):(\d{2})/gi)];const seen=new Set();times.forEach(m=>{const k=m[0];if(seen.has(k))return;seen.add(k);const a=+m[1]*60+ +m[2],b=+m[3]*60+ +m[4];if(b>a)total+=(b-a)/60})}return total}return <div className="card"><h2>Comparador WhatsApp vs cuadrante</h2><input placeholder="Empleado" value={name} onChange={e=>setName(e.target.value)}/><textarea rows="12" placeholder="Pega plantilla WhatsApp" value={text} onChange={e=>setText(e.target.value)}/><h3>Horas declaradas detectadas: {calc()} h</h3><p>Compara este total con el resumen de cuadrante semanal.</p></div>}
