@@ -464,10 +464,15 @@ function Schedule(){
  }
  return <div className="schedulePage">
   <div className="card scheduleCard mainScheduleCard">
-   <div className="row between scheduleTitleBar"><div><h2>📅 Cuadrante semanal {weekId}</h2><p className="mutedText">Selecciona empleados por franja, copia semanas y exporta el cuadrante al grupo de WhatsApp.</p></div><b className="scheduleVersion">Sprint 3.2.3</b></div>
-   <div className="mobileActionPanel">
-    <h3>Acciones rápidas</h3>
-    <div className="row controls scheduleToolbar alwaysVisibleActions">
+   <div className="scheduleFixedTopActions">
+    <div className="scheduleActionsHeader">
+     <div>
+      <h2>📅 Cuadrante semanal {weekId}</h2>
+      <p>Herramientas de trabajo visibles siempre encima del cuadrante.</p>
+     </div>
+     <b>Sprint 3.2.4</b>
+    </div>
+    <div className="scheduleActionGrid">
      <input value={weekId} onChange={e=>setWeekId(e.target.value)} title="Semana"/>
      <button onClick={()=>goWeek(-1)}>← Semana anterior</button>
      <button onClick={()=>setWeekId(currentWeek)}>Semana actual</button>
