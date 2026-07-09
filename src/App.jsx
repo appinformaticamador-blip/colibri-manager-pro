@@ -429,8 +429,7 @@ function scheduleWhatsAppText(data,weekId){
 function copyText(text){navigator.clipboard?.writeText(text).then(()=>alert('Texto copiado para WhatsApp')).catch(()=>{const t=document.createElement('textarea');t.value=text;document.body.appendChild(t);t.select();document.execCommand('copy');t.remove();alert('Texto copiado para WhatsApp')})}
 function Schedule(){
  const RESTAURANT_ID='colibri';
- const STORAGE='colibriCuadrantesRC331_CACHE';
- const EMP_STORAGE='colibriCuadrantesEmpleadosRC331_CACHE';
+ const STORAGE='colibriCuadrantesRC332_CACHE';
  const baseEmployees=[
   {id:'sonia',name:'Sonia',category:'Sala',color:'#29b6f6'},
   {id:'alvaro',name:'Álvaro',category:'Sala',color:'#66bb6a'},
@@ -445,58 +444,115 @@ function Schedule(){
  function parseJSON(key,fallback){try{const raw=localStorage.getItem(key);if(!raw)return fallback;const val=JSON.parse(raw);return val||fallback}catch{return fallback}}
  function shiftWeek(id,delta){const m=String(id||week()).match(/(\d{4})-W(\d{2})/);let y=m?+m[1]:new Date().getFullYear();let w=m?+m[2]:1;w+=delta;while(w<1){y--;w+=53}while(w>53){y++;w-=53}return `${y}-W${String(w).padStart(2,'0')}`}
  const [weekId,setWeekId]=useState(week());
- const [weekData,setWeekDataState]=useState(emptyWeek());
- const [employees,setEmployees]=useState(()=>{const raw=parseJSON(EMP_STORAGE,baseEmployees);return Array.isArray(raw)&&raw.length?raw:baseEmployees});
+ const [weekData,setWeekData]=useState(emptyWeek());
+ const [employees,setEmployees]=useState(baseEmployees);
  const [selected,setSelected]=useState(null);
  const [newName,setNewName]=useState('');
  const [newCat,setNewCat]=useState('Sala');
  const [sourceDay,setSourceDay]=useState('Lunes');
  const [targetDay,setTargetDay]=useState('Martes');
  const [dragItem,setDragItem]=useState(null);
+ const [copyItem,setCopyItem]=useState(null);
  const [syncState,setSyncState]=useState(supabase?'cargando':'sin_supabase');
  const [saving,setSaving]=useState(false);
  const [loadError,setLoadError]=useState('');
  const [lastSaved,setLastSaved]=useState('');
+ const [revision,setRevision]=useState(0);
  const [loaded,setLoaded]=useState(false);
- useEffect(()=>{loadWeekFromSupabase(weekId)},[weekId]);
- useEffect(()=>{localStorage.setItem(EMP_STORAGE,JSON.stringify(employees));saveEmployeesRemote(employees)},[employees]);
- function setLocalWeek(w){const clean=cleanWeek(w);setWeekDataState(clean);localStorage.setItem(`${STORAGE}_${weekId}`,JSON.stringify(clean));return clean}
- async function loadEmployeesRemote(){if(!supabase)return;const {data,error}=await supabase.from('work_schedule_employees').select('*').eq('restaurant_id',RESTAURANT_ID).eq('active',true).order('name',{ascending:true});if(error)throw error;if(Array.isArray(data)&&data.length){const list=data.map(e=>({id:e.employee_id,name:e.name,category:e.category||'Sala',color:e.color||'#607d8b'}));setEmployees(list);localStorage.setItem(EMP_STORAGE,JSON.stringify(list));}else{await saveEmployeesRemote(baseEmployees)}}
- async function loadWeekFromSupabase(id){setLoaded(false);setLoadError('');if(!supabase){const cached=parseJSON(`${STORAGE}_${id}`,emptyWeek());setWeekDataState(cleanWeek(cached));setSyncState('local');setLoaded(true);return}try{setSyncState('cargando');await loadEmployeesRemote();const {data,error}=await supabase.from('work_schedules').select('*').eq('restaurant_id',RESTAURANT_ID).eq('week_id',id).order('day_index',{ascending:true}).order('slot_index',{ascending:true}).order('position',{ascending:true});if(error)throw error;const w=emptyWeek();(data||[]).forEach(r=>{const d=DAYS[Number(r.day_index)];const sl=SLOTS[Number(r.slot_index)];if(d&&sl)w[d][sl].push(r.employee_id)});const clean=cleanWeek(w);setWeekDataState(clean);localStorage.setItem(`${STORAGE}_${id}`,JSON.stringify(clean));setSyncState('supabase');setLastSaved(new Date().toLocaleTimeString('es-ES'))}catch(e){const cached=parseJSON(`${STORAGE}_${id}`,emptyWeek());setWeekDataState(cleanWeek(cached));setSyncState('error_supabase');setLoadError(e?.message||String(e))}finally{setLoaded(true)}}
- async function saveWeekToSupabase(id,w){const clean=cleanWeek(w);setWeekDataState(clean);localStorage.setItem(`${STORAGE}_${id}`,JSON.stringify(clean));if(!supabase){setSyncState('local');return}setSaving(true);setLoadError('');try{const rows=[];DAYS.forEach((d,di)=>SLOTS.forEach((sl,si)=>{(clean[d][sl]||[]).slice(0,3).forEach((empId,pos)=>rows.push({restaurant_id:RESTAURANT_ID,week_id:id,day_name:d,day_index:di,slot_label:sl,slot_index:si,employee_id:empId,position:pos,updated_at:new Date().toISOString()}))}));const {error:delError}=await supabase.from('work_schedules').delete().eq('restaurant_id',RESTAURANT_ID).eq('week_id',id);if(delError)throw delError;if(rows.length){const {error:insError}=await supabase.from('work_schedules').insert(rows);if(insError)throw insError;}setSyncState('supabase');setLastSaved(new Date().toLocaleTimeString('es-ES'))}catch(e){setSyncState('error_supabase');setLoadError(e?.message||String(e))}finally{setSaving(false)}}
- async function saveEmployeesRemote(list){if(!supabase)return;try{const rows=(list||[]).map((e,idx)=>({restaurant_id:RESTAURANT_ID,employee_id:e.id,name:e.name,category:e.category||'Sala',color:e.color||EMP_COLORS[idx%EMP_COLORS.length],active:true,updated_at:new Date().toISOString()}));if(rows.length)await supabase.from('work_schedule_employees').upsert(rows,{onConflict:'restaurant_id,employee_id'})}catch(e){setLoadError(e?.message||String(e));setSyncState('error_supabase')}}
+ const weekRef=React.useRef(weekData);
+ useEffect(()=>{weekRef.current=weekData},[weekData]);
+ useEffect(()=>{loadWeek(weekId,true)},[weekId]);
+ useEffect(()=>{const t=setInterval(()=>{if(supabase&&!saving)loadWeek(weekId,false)},8000);return()=>clearInterval(t)},[weekId,saving]);
+ function cacheKey(id){return `${STORAGE}_${id}`}
+ async function loadWeek(id,showLoading){
+  if(showLoading){setLoaded(false);setSyncState(supabase?'cargando':'sin_supabase')}
+  setLoadError('');
+  if(!supabase){
+   const cached=parseJSON(cacheKey(id),{data:emptyWeek(),employees:baseEmployees});
+   setWeekData(cleanWeek(cached.data||cached));
+   setEmployees(Array.isArray(cached.employees)&&cached.employees.length?cached.employees:baseEmployees);
+   setSyncState('local');setLoaded(true);return;
+  }
+  try{
+   const {data,error}=await supabase.from('work_schedule_weeks').select('*').eq('restaurant_id',RESTAURANT_ID).eq('week_id',id).maybeSingle();
+   if(error)throw error;
+   if(data){
+    const next=cleanWeek(data.data||{});
+    const emps=Array.isArray(data.employees)&&data.employees.length?data.employees:baseEmployees;
+    setWeekData(next);setEmployees(emps);setRevision(Number(data.revision||0));
+    localStorage.setItem(cacheKey(id),JSON.stringify({data:next,employees:emps,revision:Number(data.revision||0)}));
+   }else{
+    const cached=parseJSON(cacheKey(id),null);
+    if(cached?.data){setWeekData(cleanWeek(cached.data));setEmployees(Array.isArray(cached.employees)?cached.employees:baseEmployees)}
+    else {setWeekData(emptyWeek());setEmployees(baseEmployees)}
+    setRevision(0);
+   }
+   setSyncState('supabase');setLastSaved(new Date().toLocaleTimeString('es-ES'));
+  }catch(e){
+   setSyncState('error_supabase');setLoadError(e?.message||String(e));
+   const cached=parseJSON(cacheKey(id),{data:emptyWeek(),employees:baseEmployees});
+   setWeekData(cleanWeek(cached.data||cached));setEmployees(Array.isArray(cached.employees)&&cached.employees.length?cached.employees:baseEmployees);
+  }finally{setLoaded(true)}
+ }
+ async function saveWeek(id,nextWeek,nextEmployees=employees){
+  const clean=cleanWeek(nextWeek);const safeEmployees=(Array.isArray(nextEmployees)&&nextEmployees.length?nextEmployees:baseEmployees).map((e,i)=>({id:e.id,name:e.name,category:e.category||'Sala',color:e.color||EMP_COLORS[i%EMP_COLORS.length]}));
+  setWeekData(clean);setEmployees(safeEmployees);localStorage.setItem(cacheKey(id),JSON.stringify({data:clean,employees:safeEmployees,revision:revision+1}));
+  if(!supabase){setSyncState('local');return}
+  setSaving(true);setLoadError('');
+  try{
+   const payload={restaurant_id:RESTAURANT_ID,week_id:id,data:clean,employees:safeEmployees,revision:revision+1,updated_at:new Date().toISOString()};
+   const {data,error}=await supabase.from('work_schedule_weeks').upsert(payload,{onConflict:'restaurant_id,week_id'}).select('revision,updated_at').single();
+   if(error)throw error;
+   setRevision(Number(data?.revision||revision+1));setSyncState('supabase');setLastSaved(new Date().toLocaleTimeString('es-ES'));
+  }catch(e){setSyncState('error_supabase');setLoadError(e?.message||String(e))}
+  finally{setSaving(false)}
+ }
  function getCell(day,slot){const arr=weekData?.[day]?.[slot];return Array.isArray(arr)?arr:[]}
- function setCell(day,slot,ids){const w=cleanWeek(weekData);w[day][slot]=Array.isArray(ids)?ids.slice(0,3):[];saveWeekToSupabase(weekId,w)}
  function empById(id){return employees.find(e=>e.id===id)||{id,name:id,category:'',color:'#607d8b'}}
+ function setCell(day,slot,ids){const w=cleanWeek(weekData);w[day][slot]=Array.isArray(ids)?ids.slice(0,3):[];saveWeek(weekId,w)}
  function toggleEmployee(id){if(!selected)return;const arr=getCell(selected.day,selected.slot);const next=arr.includes(id)?arr.filter(x=>x!==id):arr.length>=3?arr:[...arr,id];setCell(selected.day,selected.slot,next)}
- function addEmployee(){const name=newName.trim();if(!name)return;const id=name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'_')+'_'+Date.now().toString(36);setEmployees([...employees,{id,name,category:newCat,color:EMP_COLORS[employees.length%EMP_COLORS.length]}]);setNewName('')}
- function removeEmployee(id){if(!confirm('¿Quitar empleado del cuadrante y de las franjas asignadas?'))return;setEmployees(employees.filter(e=>e.id!==id));const w=cleanWeek(weekData);DAYS.forEach(d=>SLOTS.forEach(s=>w[d][s]=w[d][s].filter(x=>x!==id)));saveWeekToSupabase(weekId,w)}
- function clearWeek(){if(!confirm('¿Vaciar la semana actual?'))return;saveWeekToSupabase(weekId,emptyWeek())}
- async function fetchWeek(id){if(!supabase){return cleanWeek(parseJSON(`${STORAGE}_${id}`,emptyWeek()))}const {data,error}=await supabase.from('work_schedules').select('*').eq('restaurant_id',RESTAURANT_ID).eq('week_id',id).order('position',{ascending:true});if(error)throw error;const w=emptyWeek();(data||[]).forEach(r=>{const d=DAYS[Number(r.day_index)];const sl=SLOTS[Number(r.slot_index)];if(d&&sl)w[d][sl].push(r.employee_id)});return cleanWeek(w)}
- async function copyPreviousWeek(){try{const prev=shiftWeek(weekId,-1);const src=await fetchWeek(prev);saveWeekToSupabase(weekId,src);alert(`Semana ${prev} copiada`)}catch(e){alert('No se pudo copiar semana anterior: '+(e?.message||e))}}
- function duplicateNextWeek(){const nextId=shiftWeek(weekId,1);saveWeekToSupabase(nextId,weekData);setWeekId(nextId);alert('Duplicada a la semana siguiente')}
- function copyDay(){if(sourceDay===targetDay)return;const w=cleanWeek(weekData);SLOTS.forEach(s=>w[targetDay][s]=[...(w[sourceDay][s]||[])]);saveWeekToSupabase(weekId,w);alert(`${sourceDay} copiado a ${targetDay}`)}
- function moveDrag(day,slot){if(!dragItem)return;const w=cleanWeek(weekData);w[dragItem.day][dragItem.slot]=(w[dragItem.day][dragItem.slot]||[]).filter(x=>x!==dragItem.id);const dest=w[day][slot]||[];if(!dest.includes(dragItem.id)&&dest.length<3)dest.push(dragItem.id);w[day][slot]=dest.slice(0,3);saveWeekToSupabase(weekId,w);setDragItem(null)}
+ function addEmployee(){const name=newName.trim();if(!name)return;const id=name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'_')+'_'+Date.now().toString(36);const list=[...employees,{id,name,category:newCat,color:EMP_COLORS[employees.length%EMP_COLORS.length]}];setNewName('');saveWeek(weekId,weekData,list)}
+ function removeEmployee(id){if(!confirm('¿Quitar empleado y sus turnos de esta semana?'))return;const list=employees.filter(e=>e.id!==id);const w=cleanWeek(weekData);DAYS.forEach(d=>SLOTS.forEach(s=>w[d][s]=w[d][s].filter(x=>x!==id)));saveWeek(weekId,w,list)}
+ function clearWeek(){if(!confirm('¿Vaciar la semana actual?'))return;saveWeek(weekId,emptyWeek())}
+ async function fetchRemoteWeek(id){if(!supabase)return cleanWeek(parseJSON(cacheKey(id),{data:emptyWeek()}).data||{});const {data,error}=await supabase.from('work_schedule_weeks').select('data').eq('restaurant_id',RESTAURANT_ID).eq('week_id',id).maybeSingle();if(error)throw error;return cleanWeek(data?.data||{})}
+ async function copyPreviousWeek(){try{const prev=shiftWeek(weekId,-1);const src=await fetchRemoteWeek(prev);await saveWeek(weekId,src);alert(`Semana ${prev} copiada`)}catch(e){alert('No se pudo copiar: '+(e?.message||e))}}
+ async function duplicateNextWeek(){const nextId=shiftWeek(weekId,1);await saveWeek(nextId,weekData);setWeekId(nextId);alert('Duplicada a la semana siguiente')}
+ function copyDay(){if(sourceDay===targetDay)return;const w=cleanWeek(weekData);SLOTS.forEach(s=>w[targetDay][s]=[...(w[sourceDay][s]||[])]);saveWeek(weekId,w);alert(`${sourceDay} copiado a ${targetDay}`)}
+ function quickCopy(a,b){const w=cleanWeek(weekData);SLOTS.forEach(s=>w[b][s]=[...(w[a][s]||[])]);saveWeek(weekId,w)}
+ function copyDrag(day,slot){if(!dragItem)return;const w=cleanWeek(weekData);const dest=w[day][slot]||[];if(!dest.includes(dragItem.id)&&dest.length<3)dest.push(dragItem.id);w[day][slot]=dest.slice(0,3);saveWeek(weekId,w);setDragItem(null)}
+ function copyEmployeeToCell(day,slot){if(!copyItem)return false;const w=cleanWeek(weekData);const dest=w[day][slot]||[];if(!dest.includes(copyItem.id)&&dest.length<3){dest.push(copyItem.id);w[day][slot]=dest.slice(0,3);saveWeek(weekId,w)}setCopyItem(null);return true}
  const totals=useMemo(()=>{const t={};DAYS.forEach(d=>SLOTS.forEach(s=>getCell(d,s).forEach(id=>t[id]=(t[id]||0)+h(s))));return t},[weekData,employees]);
  const totalHours=Object.values(totals).reduce((a,b)=>a+b,0);
  const warnings=employees.filter(e=>totals[e.id]>40).map(e=>`${e.name} supera 40 h`);
  function buildWhatsApp(){let out=`📅 BRASERÍA EL COLIBRÍ\nCUADRANTE SEMANA ${weekId}\n\n`;DAYS.forEach(day=>{out+=`━━━━━━━━━━━━━━\n🟢 ${day.toUpperCase()}\n`;let any=false;SLOTS.forEach(slot=>{const names=getCell(day,slot).map(id=>`• ${empById(id).name}`);if(names.length){any=true;out+=`\n${slot}\n${names.join('\n')}\n`}});if(!any)out+='Sin turnos asignados\n';out+='\n'});out+='━━━━━━━━━━━━━━\nHORAS SEMANALES\n';employees.filter(e=>totals[e.id]).forEach(e=>out+=`${e.name}: ${totals[e.id].toFixed(1)} h\n`);return out}
  async function copyWhatsApp(){try{await navigator.clipboard.writeText(buildWhatsApp());alert('Texto copiado para WhatsApp')}catch{prompt('Copia el texto:',buildWhatsApp())}}
- function downloadWhatsApp(){const blob=new Blob([buildWhatsApp()],{type:'text/plain;charset=utf-8'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`cuadrante_${weekId}.txt`;a.click();URL.revokeObjectURL(a.href)}
- async function exportImage(){const cw=1500,ch=980;const canvas=document.createElement('canvas');canvas.width=cw;canvas.height=ch;const ctx=canvas.getContext('2d');ctx.fillStyle='#fff';ctx.fillRect(0,0,cw,ch);ctx.fillStyle='#073b35';ctx.font='bold 42px Arial';ctx.fillText(`Cuadrante semanal ${weekId}`,40,55);ctx.font='24px Arial';ctx.fillText('Brasería El Colibrí',40,90);const colW=(cw-80)/8,rowH=86,y0=120;ctx.font='bold 18px Arial';['Hora',...DAYS].forEach((t,i)=>{ctx.fillStyle='#0b4d43';ctx.fillRect(40+i*colW,y0,colW-6,36);ctx.fillStyle='white';ctx.fillText(t,52+i*colW,y0+25)});SLOTS.forEach((slot,r)=>{const y=y0+44+r*rowH;ctx.fillStyle='#eaf7f3';ctx.fillRect(40,y,colW-6,rowH-6);ctx.fillStyle='#073b35';ctx.font='bold 17px Arial';ctx.fillText(slot,52,y+40);DAYS.forEach((day,di)=>{const x=40+(di+1)*colW;ctx.fillStyle='#0b4d43';ctx.fillRect(x,y,colW-6,rowH-6);getCell(day,slot).forEach((id,idx)=>{const e=empById(id);ctx.fillStyle=e.color;ctx.fillRect(x+10,y+10+idx*24,colW-26,20);ctx.fillStyle='white';ctx.font='bold 14px Arial';ctx.fillText(e.name,x+16,y+25+idx*24)})})});canvas.toBlob(async blob=>{try{if(navigator.canShare&&navigator.canShare({files:[new File([blob],'cuadrante.png',{type:'image/png'})]})){await navigator.share({files:[new File([blob],'cuadrante.png',{type:'image/png'})],title:'Cuadrante'})}else{const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`cuadrante_${weekId}.png`;a.click();URL.revokeObjectURL(a.href)}}catch{}})}
- function exportPDF(){const html=`<html><head><meta charset="utf-8"><title>Cuadrante ${weekId}</title><style>body{font-family:Arial;padding:24px}table{border-collapse:collapse;width:100%}td,th{border:1px solid #ccc;padding:8px;vertical-align:top}th{background:#073b35;color:white}</style></head><body><h1>Cuadrante semanal ${weekId}</h1><pre>${buildWhatsApp()}</pre></body></html>`;const win=window.open('','_blank');win.document.write(html);win.document.close();win.print()}
- function resetLocal(){if(!confirm('¿Limpiar caché local y recargar desde Supabase?'))return;Object.keys(localStorage).filter(k=>k.startsWith(STORAGE)).forEach(k=>localStorage.removeItem(k));loadWeekFromSupabase(weekId)}
- const statusText=saving?'guardando...':syncState==='supabase'?'Supabase OK':syncState==='cargando'?'cargando...':syncState==='error_supabase'?'ERROR Supabase - local temporal':syncState==='sin_supabase'?'Supabase no configurado':'local';
- return <div className="schedulePage scheduleFresh"><div className="card scheduleCard mainScheduleCard">
-  <div className="scheduleTopButtons"><div><h2>Acciones de cuadrante RC 3.3.1</h2><p>Fuente única: <b>{statusText}</b>{lastSaved?` · ${lastSaved}`:''}</p>{loadError&&<p className="errorText">⚠️ {loadError}. Ejecuta el SQL incluido si no existen las tablas.</p>}</div><div className="scheduleActionGrid"><button onClick={()=>setWeekId(shiftWeek(weekId,-1))}>← Semana anterior</button><button onClick={()=>setWeekId(week())}>Semana actual</button><button onClick={()=>setWeekId(shiftWeek(weekId,1))}>Semana siguiente →</button><button onClick={copyPreviousWeek}>Copiar semana anterior</button><button onClick={duplicateNextWeek}>Duplicar a siguiente</button><button onClick={copyWhatsApp}>Copiar WhatsApp</button><button onClick={downloadWhatsApp}>Descargar texto</button><button onClick={exportImage}>Copiar/descargar imagen</button><button onClick={exportPDF}>Exportar PDF</button><button className="red" onClick={clearWeek}>Vaciar semana</button></div><div className="copyDayBox"><select value={sourceDay} onChange={e=>setSourceDay(e.target.value)}>{DAYS.map(d=><option key={d}>{d}</option>)}</select><span>→</span><select value={targetDay} onChange={e=>setTargetDay(e.target.value)}>{DAYS.map(d=><option key={d}>{d}</option>)}</select><button onClick={copyDay}>Copiar día</button><button className="red" onClick={resetLocal}>Recargar desde Supabase</button></div><div className="quickCopyDays"><b>Copias rápidas:</b>{DAYS.slice(0,-1).map((d,i)=><button key={d} onClick={()=>{const destino=DAYS[i+1];const w=cleanWeek(weekData);SLOTS.forEach(s=>w[destino][s]=[...(w[d][s]||[])]);saveWeekToSupabase(weekId,w);alert(`${d} copiado a ${destino}`)}}>{d} → {DAYS[i+1]}</button>)}</div></div>
-  <div className="scheduleTitleBar row between"><div><h2>Cuadrante semanal {weekId}</h2><p className="mutedText">Pulsa una celda para seleccionar hasta 3 empleados. PC y móvil leen la misma semana desde Supabase.</p></div><b className="scheduleVersion">{totalHours.toFixed(1)} h</b></div>{!loaded&&<p>Cargando cuadrante...</p>}{warnings.length>0&&<div className="warnBox">⚠️ Revisar: {warnings.join(' · ')}</div>}
-  <div className="scheduleWrap"><table className="schedulePro"><thead><tr><th>Hora</th>{DAYS.map(day=><th key={day}>{day}</th>)}</tr></thead><tbody>{SLOTS.map(slot=><tr key={slot}><td className="slotHour">{slot}</td>{DAYS.map(day=>{const ids=getCell(day,slot);return <td key={day} className="shiftCell" onClick={()=>setSelected({day,slot})} onDragOver={e=>e.preventDefault()} onDrop={e=>{e.preventDefault();moveDrag(day,slot)}}>{ids.length?ids.map(id=>{const e=empById(id);return <span key={id} className="badge" draggable onDragStart={ev=>{ev.stopPropagation();setDragItem({id,day,slot})}} onClick={ev=>{ev.stopPropagation();setSelected({day,slot})}} style={{background:e.color}}>{e.name}</span>}):<span className="emptyShift">+ añadir</span>}</td>})}</tr>)}</tbody></table></div>
-  <div className="scheduleFooter"><h3>Horas semanales</h3><b>{totalHours.toFixed(1)} h</b></div><div className="employeeSummary">{employees.filter(e=>totals[e.id]).map(e=><div key={e.id}><span className="sq" style={{background:e.color}}/> <b>{e.name}</b><em>{totals[e.id].toFixed(1)} h</em></div>)}</div><h3>Texto listo para WhatsApp</h3><textarea readOnly rows="12" value={buildWhatsApp()} onFocus={e=>e.target.select()} />
- </div><div className="card employeeManager"><h3>Empleados del cuadrante</h3><div className="row"><input placeholder="Nombre empleado" value={newName} onChange={e=>setNewName(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')addEmployee()}}/><select value={newCat} onChange={e=>setNewCat(e.target.value)}><option>Sala</option><option>Barra</option><option>Cocina</option><option>Terraza</option><option>Extra</option><option>Gerencia</option></select><button onClick={addEmployee}>Añadir</button></div><div className="employeeChips">{employees.map(e=><span key={e.id} className="employeeChip"><span className="sq" style={{background:e.color}}/> <b>{e.name}</b><small>{e.category}</small><button className="miniRed" onClick={()=>removeEmployee(e.id)}>×</button></span>)}</div></div>
- {selected&&<div className="modal" onClick={()=>setSelected(null)}><div className="card scheduleModal" onClick={e=>e.stopPropagation()}><div className="row between"><h3>{selected.day} · {selected.slot}</h3><button className="red" onClick={()=>setSelected(null)}>Cerrar</button></div><p>Selecciona máximo 3 empleados.</p><div className="empGrid">{employees.map(e=>{const active=getCell(selected.day,selected.slot).includes(e.id);return <button key={e.id} className={active?'empbtn selected':'empbtn'} onClick={()=>toggleEmployee(e.id)}><span className="sq" style={{background:e.color}}/> {e.name} <small>{e.category}</small> {active?'✓':''}</button>})}</div><button className="red" onClick={()=>setCell(selected.day,selected.slot,[])}>Vaciar esta franja</button></div></div>}
+ function downloadText(){const blob=new Blob([buildWhatsApp()],{type:'text/plain;charset=utf-8'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`cuadrante_${weekId}.txt`;a.click();URL.revokeObjectURL(a.href)}
+ async function exportImage(){const cw=1500,ch=980;const canvas=document.createElement('canvas');canvas.width=cw;canvas.height=ch;const ctx=canvas.getContext('2d');ctx.fillStyle='#fff';ctx.fillRect(0,0,cw,ch);ctx.fillStyle='#073b35';ctx.font='bold 42px Arial';ctx.fillText(`Cuadrante semanal ${weekId}`,40,55);ctx.font='24px Arial';ctx.fillText('Brasería El Colibrí',40,90);const colW=(cw-80)/8,rowH=86,y0=120;ctx.font='bold 18px Arial';['Hora',...DAYS].forEach((t,i)=>{ctx.fillStyle='#0b4d43';ctx.fillRect(40+i*colW,y0,colW-6,36);ctx.fillStyle='white';ctx.fillText(t,52+i*colW,y0+25)});SLOTS.forEach((slot,r)=>{const y=y0+44+r*rowH;ctx.fillStyle='#eef9f6';ctx.fillRect(40,y,colW-6,rowH-8);ctx.fillStyle='#073b35';ctx.font='bold 20px Arial';ctx.fillText(slot,52,y+42);DAYS.forEach((d,di)=>{const x=40+(di+1)*colW;ctx.fillStyle='#103f38';ctx.fillRect(x,y,colW-6,rowH-8);getCell(d,slot).forEach((id,idx)=>{const emp=empById(id);ctx.fillStyle=emp.color;ctx.fillRect(x+10,y+10+idx*22,colW-26,18);ctx.fillStyle='white';ctx.font='bold 14px Arial';ctx.fillText(emp.name,x+16,y+24+idx*22)})})});canvas.toBlob(b=>{const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=`cuadrante_${weekId}.png`;a.click();URL.revokeObjectURL(a.href)})}
+ function exportPDF(){window.print()}
+ if(!loaded)return <div className="card"><h2>Cargando cuadrante...</h2></div>;
+ return <div className="schedulePage scheduleFresh">
+  <div className="scheduleTopButtons">
+   <h2>Control semanal</h2><p>{syncState==='supabase'?'🟢 Guardado compartido activo':syncState==='local'?'🟡 Modo local: falta configurar Supabase':'🔴 Error Supabase'} {saving?' · guardando...':''} {lastSaved?` · ${lastSaved}`:''}</p>
+   {loadError&&<div className="warnBox">Error Supabase: {loadError}. Ejecuta el SQL RC 3.3.2 y revisa VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY.</div>}
+   {!supabase&&<div className="warnBox">Supabase no está configurado. Así PC y móvil nunca podrán compartir cuadrantes.</div>}
+   <div className="scheduleActionGrid">
+    <button onClick={()=>setWeekId(shiftWeek(weekId,-1))}>← Semana anterior</button><button onClick={()=>setWeekId(week())}>Semana actual</button><button onClick={()=>setWeekId(shiftWeek(weekId,1))}>Semana siguiente →</button><button onClick={copyPreviousWeek}>Copiar semana anterior</button><button onClick={duplicateNextWeek}>Duplicar a siguiente</button><button onClick={copyWhatsApp}>Copiar WhatsApp</button><button onClick={downloadText}>Descargar texto</button><button onClick={exportImage}>Copiar/descargar imagen</button><button onClick={exportPDF}>Exportar PDF</button><button onClick={()=>loadWeek(weekId,true)}>Recargar de Supabase</button><button className="red" onClick={clearWeek}>Vaciar semana</button>
+   </div>
+   <div className="copyDayBox"><select value={sourceDay} onChange={e=>setSourceDay(e.target.value)}>{DAYS.map(d=><option key={d}>{d}</option>)}</select><span>→</span><select value={targetDay} onChange={e=>setTargetDay(e.target.value)}>{DAYS.map(d=><option key={d}>{d}</option>)}</select><button onClick={copyDay}>Copiar día</button></div>
+   <div className="quickCopyDays"><b>Copias rápidas:</b>{DAYS.slice(0,-1).map((d,i)=><button key={d} onClick={()=>quickCopy(d,DAYS[i+1])}>{d} → {DAYS[i+1]}</button>)}</div>
+  </div>
+  <div className="card mainScheduleCard scheduleCard" id="printSchedule">
+   <div className="row between scheduleTitleBar"><div><h2>Cuadrante semanal {weekId}</h2><p className="mutedText">Fuente única: Supabase. En PC arrastra para copiar. En móvil toca un empleado y luego toca otra celda para copiarlo.</p></div><b className="scheduleVersion">{totalHours.toFixed(1)} h</b></div>
+   {warnings.length>0&&<div className="warnBox">{warnings.join(' · ')}</div>}
+   {copyItem&&<div className="copyModeBox">Copiando <b>{empById(copyItem.id).name}</b>. Toca una celda destino para pegarlo. <button onClick={()=>setCopyItem(null)}>Cancelar</button></div>}
+   <div className="scheduleWrap"><table className="schedulePro"><thead><tr><th>Hora</th>{DAYS.map(d=><th key={d}>{d}</th>)}</tr></thead><tbody>{SLOTS.map(slot=><tr key={slot}><td className="slotHour">{slot}</td>{DAYS.map(day=><td key={day+slot} className={(copyItem?'shiftCell copyReady':'shiftCell')} onClick={()=>{if(!copyEmployeeToCell(day,slot))setSelected({day,slot})}} onDragOver={e=>e.preventDefault()} onDrop={()=>copyDrag(day,slot)}>{getCell(day,slot).length===0&&<span className="emptyShift">+ añadir</span>}{getCell(day,slot).map(id=>{const emp=empById(id);return <span key={id} draggable className="badge" style={{background:emp.color,color:emp.color==='#ffee58'?'#073b35':'white'}} onClick={e=>{e.stopPropagation();setCopyItem({id,day,slot});}} onDoubleClick={e=>{e.stopPropagation();setSelected({day,slot})}} onDragStart={e=>{e.stopPropagation();setDragItem({id,day,slot})}}>{emp.name}</span>})}</td>)}</tr>)}</tbody></table></div>
+   <div className="employeeSummary">{employees.map(e=><div key={e.id}><span className="sq" style={{background:e.color}}></span><b>{e.name}</b><em>{(totals[e.id]||0).toFixed(1)} h</em></div>)}</div>
+   <textarea value={buildWhatsApp()} readOnly rows={10}/>
+  </div>
+  <div className="card employeeManager"><h2>Empleados del cuadrante</h2><div className="row"><input placeholder="Nombre" value={newName} onChange={e=>setNewName(e.target.value)}/><select value={newCat} onChange={e=>setNewCat(e.target.value)}><option>Sala</option><option>Barra</option><option>Cocina</option><option>Gerencia</option></select><button onClick={addEmployee}>Añadir empleado</button></div><div className="employeeChips">{employees.map(e=><span className="employeeChip" key={e.id}><span className="sq" style={{background:e.color}}></span><b>{e.name}</b><small>{e.category}</small><button className="miniRed" onClick={()=>removeEmployee(e.id)}>x</button></span>)}</div></div>
+  {selected&&<div className="modal" onClick={()=>setSelected(null)}><div className="card scheduleModal" onClick={e=>e.stopPropagation()}><h2>{selected.day} · {selected.slot}</h2><p>Selecciona hasta 3 empleados.</p><div className="empGrid">{employees.map(emp=>{const active=getCell(selected.day,selected.slot).includes(emp.id);return <button key={emp.id} className={'empbtn '+(active?'selected':'')} onClick={()=>toggleEmployee(emp.id)}><span className="sq" style={{background:emp.color}}></span><b>{emp.name}</b><small>{emp.category}</small></button>})}</div><button className="red" onClick={()=>setSelected(null)}>Cerrar</button></div></div>}
  </div>
 }
-
 function Compare(){const[text,setText]=useState('');const[name,setName]=useState('');function calc(){const clean=text.replace(/_/g,'');let total=0;for(const line of clean.split('\n')){const times=[...line.matchAll(/entrada\s*(\d{1,2}):(\d{2})\s*salida\s*(\d{1,2}):(\d{2})/gi)];const seen=new Set();times.forEach(m=>{const k=m[0];if(seen.has(k))return;seen.add(k);const a=+m[1]*60+ +m[2],b=+m[3]*60+ +m[4];if(b>a)total+=(b-a)/60})}return total}return <div className="card"><h2>Comparador WhatsApp vs cuadrante</h2><input placeholder="Empleado" value={name} onChange={e=>setName(e.target.value)}/><textarea rows="12" placeholder="Pega plantilla WhatsApp" value={text} onChange={e=>setText(e.target.value)}/><h3>Horas declaradas detectadas: {calc()} h</h3><p>Compara este total con el resumen de cuadrante semanal.</p></div>}
 
 function Settings(){const[settings,setSettings]=useState(null);useEffect(()=>{supabase?.from('settings').select('*').single().then(({data})=>setSettings(data))},[]);async function save(){const{error}=await supabase.from('settings').upsert(settings);if(error)alert(error.message);else alert('Guardado')}if(!settings)return <div className="card">Cargando...</div>;return <div className="card"><h2>Configuración</h2><label>Latitud<input value={settings.bar_lat} onChange={e=>setSettings({...settings,bar_lat:e.target.value})}/></label><label>Longitud<input value={settings.bar_lng} onChange={e=>setSettings({...settings,bar_lng:e.target.value})}/></label><label>Radio metros<input value={settings.gps_radius_m} onChange={e=>setSettings({...settings,gps_radius_m:e.target.value})}/></label><button onClick={save}>Guardar</button><div className="qrprint"><h3>QR físico del bar</h3><p>Imprime este código y colócalo en zona de personal.</p><img src="/qr_bar_colibri.png"/></div></div>}
