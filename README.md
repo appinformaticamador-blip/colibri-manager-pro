@@ -1,18 +1,21 @@
-# Colibrí ERP v2.4 — Estado de sincronización NUMIER
+# COLIBRÍ ERP PRO — RC 3.4.0 Foundation Clean
 
-## Incluye
-- Barra de progreso de Colibrí Sync en Manager.
-- Estado `SINCRONIZANDO` / `LIVE` / `ACTUALIZADO 100%`.
-- Tickets importados, tickets totales, pendientes y último CAB_ID.
-- Tiempo de última sincronización y porcentaje visible en dashboard.
-- Colibrí Sync v2.4 calcula el progreso leyendo `cabecera.DBF`.
+Base técnica limpia consolidada desde la RC 3.3.8 estable.
 
-## Instalación
-1. En Supabase ejecuta `sql/colibri_erp_v24_sync_progress.sql`.
-2. Sube a GitHub todo el contenido del proyecto.
-3. Commit + Push.
-4. Vercel actualizará el Manager.
-5. En GitHub Actions compila el nuevo Sync y sustituye el EXE anterior.
+## Producción
 
-## Nota
-La primera carga histórica puede tardar. Mientras tanto verás `SINCRONIZANDO XX%`. Cuando llegue al final mostrará `ACTUALIZADO 100% / LIVE`.
+- Node.js: 20.x
+- npm: 10.x
+- Instalación Vercel: `npm ci --no-audit --no-fund`
+- Build: `npm run build`
+- Salida: `dist`
+
+## Despliegue con GitHub Desktop
+
+1. Sustituir el contenido del repositorio por el contenido de esta carpeta.
+2. Abrir GitHub Desktop.
+3. Commit: `RC 3.4.0 Foundation Clean`.
+4. Push a `main`.
+5. Vercel desplegará automáticamente.
+
+No requiere SQL nuevo. Conserva la lógica y funcionalidades de la RC 3.3.8.
