@@ -52,11 +52,11 @@ public sealed class ColibriSyncApp
 
     private void Header()
     {
-        Console.WriteLine("🐦 Colibrí Sync 2.4 - NUMIER LIVE + progreso → Supabase");
+        Console.WriteLine("🐦 Colibrí Engine 3.1.0 RC2 - NUMIER LIVE + Estado del Servicio");
         Console.WriteLine("------------------------------------------------");
         Console.WriteLine($"Empresa: {_config.BusinessName}");
         Console.WriteLine($"Ruta NUMIER: {_config.NumierPath}");
-        Console.WriteLine($"Archivos: {_config.CabeceraFile} / {_config.DetalleFile}");
+        Console.WriteLine($"Archivos: {_config.CabeceraFile} / {_config.DetalleFile} / {_config.ArticulosFile}");
         Console.WriteLine($"Auto-sync: cada {_config.AutoSyncSeconds}s · Límite: {_config.MaxTicketsPerSync} tickets");
         Console.WriteLine();
     }
@@ -66,28 +66,139 @@ public sealed class ColibriSyncApp
         Log("Comprobando NUMIER...");
         string cabPath = Path.Combine(_config.NumierPath, _config.CabeceraFile);
         string detPath = Path.Combine(_config.NumierPath, _config.DetalleFile);
+        string artPath = Path.Combine(_config.NumierPath, _config.ArticulosFile);
         if (!File.Exists(cabPath)) { Log("ERROR: no existe " + cabPath); return; }
         if (!File.Exists(detPath)) { Log("ERROR: no existe " + detPath); return; }
+        bool hasArticulos = File.Exists(artPath);
+        if (!hasArticulos) Log("AVISO: no existe " + artPath + ". Se usarán descripciones de detalle.");
 
         var cabInfo = new FileInfo(cabPath);
         var detInfo = new FileInfo(detPath);
+        FileInfo? artInfo = hasArticulos ? new FileInfo(artPath) : null;
         Log($"OK cabecera: {cabInfo.Length:N0} bytes · modificado {cabInfo.LastWriteTime:dd/MM/yyyy HH:mm:ss}");
         Log($"OK detalle: {detInfo.Length:N0} bytes · modificado {detInfo.LastWriteTime:dd/MM/yyyy HH:mm:ss}");
+        if (artInfo != null) Log($"OK artículos: {artInfo.Length:N0} bytes · modificado {artInfo.LastWriteTime:dd/MM/yyyy HH:mm:ss}");
 
         var sw = Stopwatch.StartNew();
         using var api = SupabaseRest.Create(_config);
         var lastCabId = await api.GetLastCabIdAsync();
         Log($"Último CAB_ID en Supabase: {lastCabId}");
 
-        using var snapshot = SafeDbfSnapshot.Create(cabPath, detPath, Log);
+        using var snapshot = SafeDbfSnapshot.Create(cabPath, detPath, hasArticulos ? artPath : null, Log);
         var cabDbf = DbfTable.Open(snapshot.CabeceraPath);
         var detDbf = DbfTable.Open(snapshot.DetallePath);
+        DbfTable? artDbf = snapshot.ArticulosPath != null ? DbfTable.Open(snapshot.ArticulosPath) : null;
+        var articleMap = new Dictionary<string, ArticleDto>(StringComparer.OrdinalIgnoreCase);
+        if (artDbf != null)
+        {
+            articleMap = BuildArticles(artDbf, Log);
+            await api.UpsertArticlesAsync(articleMap.Values);
+            if (artInfo != null) await api.UpsertSyncFileAsync(_config.ArticulosFile, artInfo.Length, artInfo.LastWriteTimeUtc);
+            Log($"Artículos sincronizados: {articleMap.Count:N0}");
+        }
 
         if (debug)
         {
             Log("Campos cabecera: " + string.Join(", ", cabDbf.Fields.Select(f => $"{f.Name}:{f.Type}")));
             Log("Campos detalle: " + string.Join(", ", detDbf.Fields.Select(f => $"{f.Name}:{f.Type}")));
+            if (artDbf != null) Log("Campos artículos: " + string.Join(", ", artDbf.Fields.Select(f => $"{f.Name}:{f.Type}")));
         }
+
+        // Estado del Servicio LIVE: leer cuentas abiertas (CAB_ESTADO = P)
+        var openAccounts = new List<OpenAccountDto>();
+        var openIds = new HashSet<long>();
+        foreach (var rec in cabDbf.Records())
+        {
+            long cabId = rec.GetLong("CAB_ID");
+            string estado = FirstNonEmpty(rec.GetString("CAB_ESTADO"), rec.GetString("CAB_EST"));
+            if (!estado.Equals("P", StringComparison.OrdinalIgnoreCase)) continue;
+
+            var fecha = rec.GetDate("CAB_FECHA") ?? DateTime.Today;
+            var hora = rec.GetVfpDateTime("CAB_HORA") ?? fecha;
+            string mesaRaw = FirstNonEmpty(rec.GetString("CAB_MESA"), rec.GetString("CABMESA"), rec.GetString("MESA"));
+            int mesaNum = ParseMesa(mesaRaw);
+            string zona = ZoneForMesa(mesaNum);
+            decimal totalCab = FirstDecimal(rec, new [] { "CAB_TOTAL", "CAB_TOT", "CAB_IMPOR", "CAB_IMPORTE", "TOTAL" });
+            string numdoc = FirstNonEmpty(rec.GetString("CAB_NUMDOC"), rec.GetString("NUMDOC"));
+
+            openIds.Add(cabId);
+            openAccounts.Add(new OpenAccountDto
+            {
+                CabId = cabId,
+                Mesa = mesaRaw,
+                MesaNumero = mesaNum,
+                Zona = zona,
+                OpenedAt = hora.ToUniversalTime().ToString("O"),
+                Numdoc = numdoc,
+                Status = estado,
+                Total = totalCab,
+                LastSeenAt = DateTime.UtcNow.ToString("O")
+            });
+        }
+
+
+        // Auditoría operativa: N = borrada manualmente, X = anulada, G = gasto. No suma como venta ni pendiente.
+        var auditEvents = new List<AuditEventDto>();
+        foreach (var rec in cabDbf.Records())
+        {
+            long cabId = rec.GetLong("CAB_ID");
+            string estado = FirstNonEmpty(rec.GetString("CAB_ESTADO"), rec.GetString("CAB_EST"));
+            if (!(estado.Equals("N", StringComparison.OrdinalIgnoreCase) || estado.Equals("X", StringComparison.OrdinalIgnoreCase) || estado.Equals("G", StringComparison.OrdinalIgnoreCase))) continue;
+            var fecha = rec.GetDate("CAB_FECHA") ?? DateTime.Today;
+            var hora = rec.GetVfpDateTime("CAB_HORA") ?? fecha;
+            string mesaRaw = FirstNonEmpty(rec.GetString("CAB_MESA"), rec.GetString("CABMESA"), rec.GetString("MESA"));
+            int mesaNum = ParseMesa(mesaRaw);
+            auditEvents.Add(new AuditEventDto
+            {
+                CabId = cabId,
+                Estado = estado.ToUpperInvariant(),
+                Mesa = mesaRaw,
+                MesaNumero = mesaNum,
+                Zona = ZoneForMesa(mesaNum),
+                Hora = hora.ToUniversalTime().ToString("O"),
+                Numdoc = FirstNonEmpty(rec.GetString("CAB_NUMDOC"), rec.GetString("NUMDOC")),
+                Total = FirstDecimal(rec, new [] { "CAB_TOTAL", "CAB_TOT", "CAB_IMPOR", "CAB_IMPORTE", "TOTAL" }),
+                LastSeenAt = DateTime.UtcNow.ToString("O")
+            });
+        }
+        await api.UpsertAuditEventsAsync(auditEvents);
+        if (auditEvents.Count > 0) Log($"Auditoría operativa: {auditEvents.Count:N0} eventos N/X/G registrados.");
+
+        if (openAccounts.Count > 0)
+        {
+            var openTotals = new Dictionary<long, decimal>();
+            var openLines = new List<TicketLineDto>();
+            int openDetailScanned = 0;
+            foreach (var r in detDbf.Records())
+            {
+                openDetailScanned++;
+                long cabId = r.GetLong("DET_ID");
+                if (!openIds.Contains(cabId)) continue;
+                decimal importe = r.GetDecimal("DET_IMPORT");
+                openTotals[cabId] = openTotals.GetValueOrDefault(cabId) + importe;
+                var lineId = r.GetLong("ID");
+                if (lineId <= 0) lineId = openDetailScanned;
+                openLines.Add(new TicketLineDto
+                {
+                    CabId = cabId,
+                    LineKey = $"{cabId}-{lineId}",
+                    Articulo = r.GetString("DET_ARTICU"),
+                    Descripcion = ArticleName(articleMap, r.GetString("DET_ARTICU"), FirstNonEmpty(r.GetString("DET_CAD_PR"), r.GetString("DET_OPCION"))),
+                    Cantidad = r.GetDecimal("DET_CANTID"),
+                    Precio = r.GetDecimal("DET_PRECIO"),
+                    Importe = importe,
+                    Iva = r.GetDecimal("DET_TIPO_I")
+                });
+            }
+            foreach (var oa in openAccounts)
+            {
+                if (oa.Total <= 0 && openTotals.TryGetValue(oa.CabId, out var tv)) oa.Total = tv;
+            }
+            await api.UpsertLinesAsync(openLines);
+        }
+        await api.UpsertOpenAccountsAsync(openAccounts);
+        await api.MarkOpenAccountsSnapshotAsync();
+        Log($"Estado del servicio: {openAccounts.Count:N0} cuentas abiertas. Pendiente: {openAccounts.Sum(o=>o.Total):N2} €");
 
         var newTickets = new List<TicketDto>();
         long maxCabSeen = lastCabId;
@@ -171,7 +282,7 @@ public sealed class ColibriSyncApp
                 CabId = cabId,
                 LineKey = $"{cabId}-{lineId}",
                 Articulo = r.GetString("DET_ARTICU"),
-                Descripcion = FirstNonEmpty(r.GetString("DET_CAD_PR"), r.GetString("DET_OPCION")),
+                Descripcion = ArticleName(articleMap, r.GetString("DET_ARTICU"), FirstNonEmpty(r.GetString("DET_CAD_PR"), r.GetString("DET_OPCION"))),
                 Cantidad = r.GetDecimal("DET_CANTID"),
                 Precio = r.GetDecimal("DET_PRECIO"),
                 Importe = importe,
@@ -219,6 +330,76 @@ public sealed class ColibriSyncApp
         Log($"Sincronizados {newTickets.Count:N0} tickets y {lines.Count:N0} líneas. Progreso: {pct:N2}% ({processedAfter:N0}/{totalCobrados:N0}). Pendientes: {pending:N0}. Tiempo: {sw.Elapsed.TotalSeconds:N1}s");
     }
 
+
+    private static Dictionary<string, ArticleDto> BuildArticles(DbfTable artDbf, Action<string> log)
+    {
+        string codeField = FindField(artDbf, new[] { "ART_CODIGO", "ARTICULO", "CODIGO", "ART_COD", "COD_ART", "ID" }, new[] { "COD", "ART" }) ?? "";
+        string nameField = FindField(artDbf, new[] { "ART_NOMBRE", "ART_DESCRI", "DESCRIP", "DESCRIPCIO", "DESCRIPCION", "NOMBRE", "TITULO" }, new[] { "DES", "NOM" }) ?? "";
+        string familyField = FindField(artDbf, new[] { "FAMILIA", "ART_FAMIL", "CATEGORIA", "CAT", "GRUPO" }, new[] { "FAM", "CAT", "GRU" }) ?? "";
+        string priceField = FindField(artDbf, new[] { "PRECIO", "PVP", "ART_PVP", "PVENTA", "VENTA" }, new[] { "PVP", "PREC" }) ?? "";
+        string ivaField = FindField(artDbf, new[] { "IVA", "TIPO_IVA", "ART_IVA", "TIPO_I" }, new[] { "IVA" }) ?? "";
+        log($"Mapeo artículos: código={codeField}, nombre={nameField}, familia={familyField}, precio={priceField}, iva={ivaField}");
+        var map = new Dictionary<string, ArticleDto>(StringComparer.OrdinalIgnoreCase);
+        foreach (var r in artDbf.Records())
+        {
+            var code = !string.IsNullOrWhiteSpace(codeField) ? r.GetString(codeField) : "";
+            if (string.IsNullOrWhiteSpace(code)) continue;
+            var name = !string.IsNullOrWhiteSpace(nameField) ? r.GetString(nameField) : code;
+            var family = !string.IsNullOrWhiteSpace(familyField) ? r.GetString(familyField) : "";
+            var price = !string.IsNullOrWhiteSpace(priceField) ? r.GetDecimal(priceField) : 0;
+            var iva = !string.IsNullOrWhiteSpace(ivaField) ? r.GetDecimal(ivaField) : 0;
+            map[code.Trim()] = new ArticleDto { ArticleCode = code.Trim(), ArticleName = string.IsNullOrWhiteSpace(name) ? code.Trim() : name.Trim(), Family = family.Trim(), Price = price, Iva = iva };
+        }
+        return map;
+    }
+
+    private static string? FindField(DbfTable table, string[] exactCandidates, string[] containsCandidates)
+    {
+        var names = table.Fields.Select(f => f.Name).ToList();
+        foreach (var c in exactCandidates)
+        {
+            var hit = names.FirstOrDefault(n => n.Equals(c, StringComparison.OrdinalIgnoreCase));
+            if (hit != null) return hit;
+        }
+        foreach (var c in containsCandidates)
+        {
+            var hit = names.FirstOrDefault(n => n.Contains(c, StringComparison.OrdinalIgnoreCase));
+            if (hit != null) return hit;
+        }
+        return null;
+    }
+
+
+    private static int ParseMesa(string mesaRaw)
+    {
+        var s = new string((mesaRaw ?? "").Where(char.IsDigit).ToArray());
+        return int.TryParse(s, out var n) ? n : 0;
+    }
+
+    private static string ZoneForMesa(int mesa)
+    {
+        if (mesa >= 1 && mesa <= 19) return "terraza";
+        if (mesa >= 20 && mesa <= 30) return "salon";
+        return "barra";
+    }
+
+    private static decimal FirstDecimal(DbfRecord rec, string[] names)
+    {
+        foreach (var n in names)
+        {
+            var v = rec.GetDecimal(n);
+            if (v != 0) return v;
+        }
+        return 0;
+    }
+
+    private static string ArticleName(Dictionary<string, ArticleDto> map, string code, string fallback)
+    {
+        code = (code ?? "").Trim();
+        if (!string.IsNullOrWhiteSpace(code) && map.TryGetValue(code, out var art) && !string.IsNullOrWhiteSpace(art.ArticleName)) return art.ArticleName;
+        return string.IsNullOrWhiteSpace(fallback) ? code : fallback;
+    }
+
     private static string FirstNonEmpty(params string[] values) => values.FirstOrDefault(v => !string.IsNullOrWhiteSpace(v)) ?? "";
     private static void Log(string msg) => Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] {msg}");
 }
@@ -228,25 +409,29 @@ public sealed class SafeDbfSnapshot : IDisposable
 {
     public string CabeceraPath { get; }
     public string DetallePath { get; }
+    public string? ArticulosPath { get; }
     private readonly string _dir;
 
-    private SafeDbfSnapshot(string dir, string cabeceraPath, string detallePath)
+    private SafeDbfSnapshot(string dir, string cabeceraPath, string detallePath, string? articulosPath)
     {
         _dir = dir;
         CabeceraPath = cabeceraPath;
         DetallePath = detallePath;
+        ArticulosPath = articulosPath;
     }
 
-    public static SafeDbfSnapshot Create(string cabeceraSource, string detalleSource, Action<string> log)
+    public static SafeDbfSnapshot Create(string cabeceraSource, string detalleSource, string? articulosSource, Action<string> log)
     {
         string baseDir = Path.Combine(Path.GetTempPath(), "ColibriSync", "snapshots", DateTime.Now.ToString("yyyyMMdd_HHmmss_fff"));
         Directory.CreateDirectory(baseDir);
         string cabDest = Path.Combine(baseDir, Path.GetFileName(cabeceraSource));
         string detDest = Path.Combine(baseDir, Path.GetFileName(detalleSource));
+        string? artDest = articulosSource != null ? Path.Combine(baseDir, Path.GetFileName(articulosSource)) : null;
         CopyWithRetries(cabeceraSource, cabDest, log);
         CopyWithRetries(detalleSource, detDest, log);
+        if (articulosSource != null && artDest != null) CopyWithRetries(articulosSource, artDest, log);
         log("Copia temporal segura creada. NUMIER puede seguir abierto.");
-        return new SafeDbfSnapshot(baseDir, cabDest, detDest);
+        return new SafeDbfSnapshot(baseDir, cabDest, detDest, artDest);
     }
 
     private static void CopyWithRetries(string source, string dest, Action<string> log)
@@ -282,6 +467,7 @@ public sealed record SyncConfig
     public string NumierPath { get; init; } = @"C:\NUMIER\DATOS";
     public string CabeceraFile { get; init; } = "cabecera.DBF";
     public string DetalleFile { get; init; } = "detalle.DBF";
+    public string ArticulosFile { get; init; } = "articulos.DBF";
     public string SupabaseUrl { get; init; } = "https://xccyaoziutlxxklcofrw.supabase.co";
     public string SupabaseAnonKey { get; init; } = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhjY3lhb3ppdXRseHhrbGNvZnJ3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODMyNzg4NTYsImV4cCI6MjA5ODg1NDg1Nn0.gJHhvB_cVsiqirPesHdSoBwWBKzzsXSveZ-WXla3aSs";
     public int AutoSyncSeconds { get; init; } = 60;
@@ -318,6 +504,14 @@ public sealed class SupabaseRest : IDisposable
 
     public async Task UpsertTicketsAsync(IEnumerable<TicketDto> rows) => await Upsert("numier_tickets", "cab_id", rows);
     public async Task UpsertLinesAsync(IEnumerable<TicketLineDto> rows) => await Upsert("numier_ticket_lines", "line_key", rows);
+    public async Task UpsertArticlesAsync(IEnumerable<ArticleDto> rows) => await Upsert("numier_articles", "article_code", rows);
+    public async Task UpsertOpenAccountsAsync(IEnumerable<OpenAccountDto> rows) => await Upsert("numier_open_accounts", "cab_id", rows);
+    public async Task UpsertAuditEventsAsync(IEnumerable<AuditEventDto> rows) => await Upsert("numier_audit_events", "cab_id", rows);
+    public async Task MarkOpenAccountsSnapshotAsync()
+    {
+        var row = new[] { new ServiceStatusDto { StatusKey = "service", UpdatedAt = DateTime.UtcNow.ToString("O") } };
+        await Upsert("numier_service_status", "status_key", row);
+    }
     public async Task UpsertSyncFileAsync(string fileName, long size, DateTime modifiedUtc)
     {
         var row = new[] { new SyncFileDto { Source = "numier", FileName = fileName, FileSize = size, ModifiedAt = modifiedUtc.ToString("O"), SyncedAt = DateTime.UtcNow.ToString("O") } };
@@ -343,6 +537,17 @@ public sealed class SupabaseRest : IDisposable
     }
 }
 
+public sealed class ArticleDto
+{
+    [JsonPropertyName("article_code")] public string ArticleCode { get; set; } = "";
+    [JsonPropertyName("article_name")] public string ArticleName { get; set; } = "";
+    [JsonPropertyName("family")] public string? Family { get; set; }
+    [JsonPropertyName("category_code")] public string? CategoryCode { get; set; }
+    [JsonPropertyName("price")] public decimal Price { get; set; }
+    [JsonPropertyName("iva")] public decimal Iva { get; set; }
+    [JsonPropertyName("active")] public bool Active { get; set; } = true;
+}
+
 public sealed class TicketDto
 {
     [JsonPropertyName("cab_id")] public long CabId { get; set; }
@@ -366,6 +571,36 @@ public sealed class TicketLineDto
     [JsonPropertyName("precio")] public decimal Precio { get; set; }
     [JsonPropertyName("importe")] public decimal Importe { get; set; }
     [JsonPropertyName("iva")] public decimal Iva { get; set; }
+}
+public sealed class OpenAccountDto
+{
+    [JsonPropertyName("cab_id")] public long CabId { get; set; }
+    [JsonPropertyName("mesa")] public string? Mesa { get; set; }
+    [JsonPropertyName("mesa_numero")] public int MesaNumero { get; set; }
+    [JsonPropertyName("zona")] public string? Zona { get; set; }
+    [JsonPropertyName("opened_at")] public string? OpenedAt { get; set; }
+    [JsonPropertyName("numdoc")] public string? Numdoc { get; set; }
+    [JsonPropertyName("status")] public string? Status { get; set; }
+    [JsonPropertyName("total")] public decimal Total { get; set; }
+    [JsonPropertyName("last_seen_at")] public string? LastSeenAt { get; set; }
+}
+
+public sealed class AuditEventDto
+{
+    [JsonPropertyName("cab_id")] public long CabId { get; set; }
+    [JsonPropertyName("estado")] public string? Estado { get; set; }
+    [JsonPropertyName("mesa")] public string? Mesa { get; set; }
+    [JsonPropertyName("mesa_numero")] public int MesaNumero { get; set; }
+    [JsonPropertyName("zona")] public string? Zona { get; set; }
+    [JsonPropertyName("hora")] public string? Hora { get; set; }
+    [JsonPropertyName("numdoc")] public string? Numdoc { get; set; }
+    [JsonPropertyName("total")] public decimal Total { get; set; }
+    [JsonPropertyName("last_seen_at")] public string? LastSeenAt { get; set; }
+}
+public sealed class ServiceStatusDto
+{
+    [JsonPropertyName("status_key")] public string StatusKey { get; set; } = "service";
+    [JsonPropertyName("updated_at")] public string? UpdatedAt { get; set; }
 }
 public sealed class SyncFileDto
 {

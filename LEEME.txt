@@ -1,0 +1,19 @@
+COLIBRÍ ERP PRO - HOTFIX 3.1.2
+
+Este paquete contiene los archivos de reemplazo:
+
+1) src/App.jsx
+2) web/src/App.jsx
+
+Copia ambos en las mismas rutas del proyecto, reemplazando los existentes.
+Después ejecuta:
+
+npm run build
+git add src/App.jsx web/src/App.jsx
+git commit -m "hotfix: fix blank modules cuadrantes comparador config"
+git push origin develop
+
+Motivo:
+- Evita pantalla blanca en Cuadrantes / Comparador / Configuración.
+- Define correctamente Schedule, Compare y Settings.
+- Mantiene la app estable sin tocar Supabase ni SQL.

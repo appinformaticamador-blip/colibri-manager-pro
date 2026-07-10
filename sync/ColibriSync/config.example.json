@@ -2,9 +2,11 @@
   "numier_path": "C:\\NUMIER\\DATOS",
   "cabecera_file": "cabecera.DBF",
   "detalle_file": "detalle.DBF",
+  "articulos_file": "articulos.DBF",
   "supabase_url": "https://xccyaoziutlxxklcofrw.supabase.co",
-  "supabase_anon_key": "PEGA_AQUI_TU_ANON_KEY",
+  "supabase_anon_key": "",
   "auto_sync_seconds": 60,
   "max_tickets_per_sync": 500,
-  "business_name": "Brasería El Colibrí"
+  "business_name": "Brasería El Colibrí",
+  "admin_exit_password": "131313"
 }
