@@ -749,9 +749,42 @@ function buildDashboardTimeline(tickets,clockRows,daily,objective){
  return events.sort((a,b)=>new Date(a.time)-new Date(b.time)).slice(0,10);
 }
 function workingFromClock(rows){const latest=new Map();(rows||[]).forEach(r=>{const k=r.employee_id||r.employee_name;if(!latest.has(k))latest.set(k,r)});return [...latest.values()].filter(r=>String(r.type).toLowerCase()==='entrada')}
+function dashboardStatus({summary,open,terrace,salon,barra,totalPending,oldest,occTerrace,occSalon}){
+ const alerts=[];
+ if(oldest>=90)alerts.push({level:'critical',icon:'🔴',title:'Cuenta demasiado antigua',text:`La cuenta más antigua lleva ${durationShort(oldest)} abierta.`});
+ else if(oldest>=60)alerts.push({level:'warning',icon:'🟠',title:'Revisar permanencia',text:`La cuenta más antigua lleva ${durationShort(oldest)} abierta.`});
+ if(barra.length>=6)alerts.push({level:'critical',icon:'🔴',title:'Barra muy cargada',text:`Hay ${barra.length} cuentas abiertas en barra.`});
+ else if(barra.length>=4)alerts.push({level:'warning',icon:'🟠',title:'Barra con actividad alta',text:`Hay ${barra.length} cuentas abiertas en barra.`});
+ if(occTerrace>=85)alerts.push({level:'warning',icon:'🟠',title:'Terraza casi completa',text:`Ocupación estimada del ${occTerrace}%.`});
+ if(occSalon>=85)alerts.push({level:'warning',icon:'🟠',title:'Salón casi completo',text:`Ocupación estimada del ${occSalon}%.`});
+ if(totalPending>=250)alerts.push({level:'warning',icon:'🟠',title:'Pendiente elevado',text:`Hay ${money(totalPending)} pendientes de cobro.`});
+ if(!alerts.length)alerts.push({level:'positive',icon:'🟢',title:'Todo bajo control',text:'No hay incidencias operativas relevantes ahora mismo.'});
+ let label='SERVICIO NORMAL',tone='positive',message='Todo bajo control. El servicio está funcionando con normalidad.';
+ if(alerts.some(a=>a.level==='critical')){label='ATENCIÓN NECESARIA';tone='critical';message='Hay situaciones que conviene revisar ahora.'}
+ else if(alerts.some(a=>a.level==='warning')){label='SERVICIO CON ACTIVIDAD';tone='warning';message='El negocio está activo. Conviene vigilar los avisos destacados.'}
+ return {alerts:alerts.slice(0,5),label,tone,message};
+}
+function colibriIndex({summary,totalPending,oldest,occTotal,alerts}){
+ let score=100;
+ if(oldest>=120)score-=28;else if(oldest>=90)score-=20;else if(oldest>=60)score-=10;
+ if(totalPending>=300)score-=15;else if(totalPending>=150)score-=8;
+ if(occTotal>=95)score-=8;
+ score-=alerts.filter(a=>a.level==='critical').length*10;
+ score-=alerts.filter(a=>a.level==='warning').length*4;
+ if(summary.total>0)score+=3;
+ return Math.max(0,Math.min(100,Math.round(score)));
+}
+function dashboardRecommendation({projected,objective,barra,oldest,occTerrace,totalPending,summary}){
+ if(oldest>=90)return `Revisa la cuenta más antigua: lleva ${durationShort(oldest)} abierta.`;
+ if(barra.length>=6)return `La barra tiene ${barra.length} cuentas abiertas. Conviene reforzar su seguimiento.`;
+ if(occTerrace>=85)return `La terraza está al ${occTerrace}%. Prepárate para gestionar rotación y cobros.`;
+ if(totalPending>=200)return `Hay ${money(totalPending)} pendientes. Conviene revisar las cuentas antes del siguiente pico.`;
+ if(projected>summary.total&&objective>0)return `Con el ritmo actual, la previsión de cierre es de ${money(projected)}.`;
+ return 'Servicio estable. Mantén el ritmo actual y vigila nuevas aperturas.';
+}
 function Dashboard(){
  const[date,setDate]=useState(today());
- const[state,setState]=useState({tickets:[],lines:[],articles:new Map(),clock:[],sync:null,syncStatus:null,prev:null,avgSameDay:null,goal:null,loading:true,error:null});
+ const[state,setState]=useState({tickets:[],lines:[],articles:new Map(),clock:[],sync:null,syncStatus:null,prev:null,avgSameDay:null,goal:null,service:{open:[],audit:[]},loading:true,error:null});
  useEffect(()=>{load();const t=setInterval(load,15000);return()=>clearInterval(t)},[date]);
  async function load(){
   if(!supabase){setState(s=>({...s,error:'Supabase no configurado',loading:false}));return}
@@ -759,42 +792,64 @@ function Dashboard(){
    const start=date+'T00:00:00';const end=addDays(date,1)+'T00:00:00';
    const prevDate=addDays(date,-7);
    const sameDays=[addDays(date,-7),addDays(date,-14),addDays(date,-21),addDays(date,-28)];
-   const [rangeData,clockRes,syncStatus,prevData,...avgData]=await Promise.all([
+   const [rangeData,clockRes,syncStatus,prevData,serviceData,...avgData]=await Promise.all([
     loadSalesRange(date,addDays(date,1)),
     supabase.from('clock_records').select('*').gte('created_at',start).lt('created_at',end).order('created_at',{ascending:false}).limit(500),
     loadSyncStatus(),
     loadSalesForDate(prevDate),
+    date===today()?loadServiceState():Promise.resolve({open:[],audit:[],status:null}),
     ...sameDays.map(d=>loadSalesForDate(d))
    ]);
    const summary=summarizeTickets(rangeData.tickets||[]);
    const smart=await loadSmartGoal(date,summary.total);
    const avgTotals=avgData.map(x=>Number(x?.daily?.total||0)).filter(v=>v>0);
    const avgSameDay=avgTotals.length?avgTotals.reduce((a,b)=>a+b,0)/avgTotals.length:0;
-   setState({tickets:rangeData.tickets||[],lines:rangeData.lines||[],articles:rangeData.articles||new Map(),clock:clockRes.data||[],sync:rangeData.sync||null,syncStatus,prev:prevData.daily||null,avgSameDay,goal:smart,loading:false,error:null});
+   setState({tickets:rangeData.tickets||[],lines:rangeData.lines||[],articles:rangeData.articles||new Map(),clock:clockRes.data||[],sync:rangeData.sync||null,syncStatus,prev:prevData.daily||null,avgSameDay,goal:smart,service:serviceData||{open:[],audit:[]},loading:false,error:null});
   }catch(e){setState(s=>({...s,loading:false,error:e.message||String(e)}))}
  }
  const summary=summarizeTickets(state.tickets);
  const working=workingFromClock(state.clock);
  const objective=Number(state.goal?.goal||750);
- const progress=Math.min(100,objective?summary.total/objective*100:0);
  const projected=Number(state.goal?.projected||summary.total);
  const vsPrev=pctDiff(summary.total,state.prev?.total);
- const vsAvg=pctDiff(summary.total,state.avgSameDay);
- const syncPct=Number(state.syncStatus?.progress_percent||0);
- const live=syncPct>=100||String(state.syncStatus?.mode||'').includes('LIVE');
- const topProducts=productRank(state.lines,'qty',state.articles).slice(0,5);
- const timeline=buildDashboardTimeline(state.tickets,state.clock,summary,objective);
- const statusColor=progress>=100?'🟢':progress>=75?'🟡':'🔴';
- const aiText=progress>=100?`Objetivo inteligente conseguido. Has superado los ${money(objective)} previstos para hoy.`:`Objetivo inteligente: ${money(objective)}. ${state.goal?.message||''} Previsión de cierre: ${money(projected)}.`;
- return <div className="commandCenter">
-  <div className="proHero"><div><span className="pill">Colibrí ERP PRO 3.0 · Beta</span><h1>{getGreeting()}, Alfonso</h1><p>{fmtDate(date)} · Centro de mando conectado a Supabase</p></div><div className="liveBox"><b>{live?'🟢 ERP LIVE':'🟡 Sincronizando'}</b><span>{secondsAgo(state.syncStatus?.updated_at||state.sync?.synced_at)}</span></div></div>
+ const open=state.service?.open||[];
+ const terrace=open.filter(o=>o.zona==='terraza');
+ const salon=open.filter(o=>o.zona==='salon');
+ const barra=open.filter(o=>o.zona==='barra');
+ const totalPending=open.reduce((a,o)=>a+Number(o.total||0),0);
+ const oldest=open.length?Math.max(...open.map(o=>minutesOpen(o.opened_at))):0;
+ const occTerrace=Math.round((terrace.length/15)*100);
+ const occSalon=Math.round((salon.length/8)*100);
+ const occTotal=Math.round(((terrace.length+salon.length)/23)*100);
+ const business=dashboardStatus({summary,open,terrace,salon,barra,totalPending,oldest,occTerrace,occSalon});
+ const index=colibriIndex({summary,totalPending,oldest,occTotal,alerts:business.alerts});
+ const recommendation=dashboardRecommendation({projected,objective,barra,oldest,occTerrace,totalPending,summary});
+ const recentOpen=open.slice().sort((a,b)=>new Date(b.opened_at)-new Date(a.opened_at)).slice(0,5);
+ const latestTickets=(state.tickets||[]).slice().sort((a,b)=>new Date(b.hora||b.created_at)-new Date(a.hora||a.created_at)).slice(0,5);
+ const activity=[...recentOpen.map((o,i)=>({time:o.opened_at,icon:'●',text:`${accountLabel(o,i)} abierta`,amount:money(o.total)})),...latestTickets.map(t=>({time:t.hora||t.created_at,icon:'✓',text:`Ticket ${t.numdoc||t.cab_id||''} cobrado`,amount:money(t.total)}))].sort((a,b)=>new Date(b.time)-new Date(a.time)).slice(0,6);
+ const indexLabel=index>=90?'Excelente':index>=75?'Bien':index>=55?'Vigilancia':'Atención';
+ return <div className="executiveDashboard">
+  <div className={'executiveHero '+business.tone}>
+   <div><span className="pill">Colibrí ERP PRO · Dashboard Ejecutivo</span><h1>{getGreeting()}, Alfonso</h1><p>{fmtDate(date)} · Resumen del negocio de un vistazo</p></div>
+   <div className="businessStatus"><b>{business.tone==='critical'?'🔴':business.tone==='warning'?'🟠':'🟢'} {business.label}</b><span>{business.message}</span><small>Actualizado {secondsAgo(state.service?.status?.updated_at||state.syncStatus?.updated_at||state.sync?.synced_at)}</small></div>
+  </div>
   {state.error&&<div className="card error">{state.error}</div>}
-  <SyncStatusCard/>
-  <div className="proGrid"><div className="proKpi"><span>Ventas hoy</span><b>{money(summary.total)}</b><em>{formatPct(vsPrev)} vs semana pasada</em></div><div className="proKpi"><span>Objetivo IA +10%</span><b>{money(objective)}</b><em>{progress.toFixed(1)}% conseguido</em></div><div className="proKpi"><span>Predicción cierre</span><b>{money(projected)}</b><em>{projected>=objective?'por encima':'por debajo'} del objetivo</em></div><div className="proKpi"><span>Tickets</span><b>{summary.tickets}</b><em>{money(summary.ticket_medio)} ticket medio</em></div><div className="proKpi"><span>Personal</span><b>{working.length}</b><em>trabajando ahora</em></div></div>
-  <div className="card objectiveCard"><div className="row between"><h2>{statusColor} Objetivo inteligente</h2><b>{progress.toFixed(1)}%</b></div><div className="progress"><i style={{width:`${progress}%`}}></i></div><p>{aiText}</p><p className="mutedText">Crecimiento objetivo aplicado: +10% sobre histórico comparable.</p></div>
-  <div className="grid"><div className="card"><h2>🧠 Qué deberías saber ahora</h2><p>{aiText}</p><p>Media últimos días similares: <b>{state.avgSameDay?money(state.avgSameDay):'-'}</b></p></div><div className="card"><h2>📈 Ventas por hora</h2><SalesByHour tickets={state.tickets}/></div><div className="card"><h2>👥 Trabajando ahora</h2><div className="big">{working.length}</div>{working.map(w=><p key={w.id}>🟢 {w.employee_name}</p>)}</div></div>
-  <div className="grid"><div className="card"><h2>🥇 Productos TOP</h2>{topProducts.length?topProducts.map((p,i)=><p key={p.name}>{i===0?'🥇':i===1?'🥈':i===2?'🥉':i+1} <b>{p.name}</b> · {p.qty.toFixed(0)} uds · {money(p.total)}</p>):<p>Sin productos en el periodo.</p>}</div><div className="card"><h2>🕒 Timeline del día</h2>{timeline.length?timeline.map((e,i)=><p key={i}><b>{safeHour(e.time)}</b> {e.icon} {e.text}</p>):<p>Aún sin eventos suficientes.</p>}</div></div>
-  <ProductRanking lines={state.lines} articles={state.articles}/>
+  <div className="executiveKpis">
+   <div className="execKpi sales"><span>Ventas hoy</span><b>{money(summary.total)}</b><em>{formatPct(vsPrev)} vs sábado/semana anterior</em></div>
+   <div className="execKpi pending"><span>Pendiente de cobro</span><b>{money(totalPending)}</b><em>{open.length} cuentas abiertas</em></div>
+   <div className="execKpi accounts"><span>Cuentas activas</span><b>{open.length}</b><em>{terrace.length} terraza · {salon.length} salón · {barra.length} barra</em></div>
+   <div className="execKpi occupancy"><span>Ocupación mesas</span><b>{occTotal}%</b><em>Terraza {occTerrace}% · Salón {occSalon}%</em></div>
+  </div>
+  <div className="executiveColumns">
+   <div className="card attentionCenter"><div className="row between"><h2>⚠ Centro de atención</h2><span className="attentionCount">{business.alerts.filter(a=>a.level!=='positive').length}</span></div>{business.alerts.map((a,i)=><div className={'attentionItem '+a.level} key={i}><span>{a.icon}</span><div><b>{a.title}</b><p>{a.text}</p></div></div>)}</div>
+   <div className="card colibriScore"><h2>Índice Colibrí</h2><div className={'scoreCircle '+(index>=90?'excellent':index>=75?'good':index>=55?'watch':'risk')}><b>{index}</b><span>/100</span></div><h3>{indexLabel}</h3><p>Resume ventas, ocupación, antigüedad de cuentas y alertas operativas.</p></div>
+   <div className="card aiExecutive"><h2>💡 Recomendación</h2><p>{recommendation}</p><div className="forecastLine"><span>Previsión de cierre</span><b>{money(projected)}</b></div><div className="forecastLine"><span>Objetivo inteligente</span><b>{money(objective)}</b></div></div>
+  </div>
+  <div className="executiveColumns lower">
+   <div className="card zoneSnapshot"><h2>Estado por zonas</h2><div className="zoneRow"><span>Terraza</span><b>{terrace.length}/15</b><em>{occTerrace}%</em></div><OccupancyBar value={occTerrace}/><div className="zoneRow"><span>Salón</span><b>{salon.length}/8</b><em>{occSalon}%</em></div><OccupancyBar value={occSalon}/><div className="zoneRow"><span>Barra</span><b>{barra.length} cuentas</b><em>{money(barra.reduce((a,o)=>a+Number(o.total||0),0))}</em></div></div>
+   <div className="card daySummary"><h2>Resumen del día</h2><div className="summaryTiles"><div><span>Tickets</span><b>{summary.tickets}</b></div><div><span>Ticket medio</span><b>{money(summary.ticket_medio)}</b></div><div><span>Personal ahora</span><b>{working.length}</b></div><div><span>Cuenta más antigua</span><b>{durationShort(oldest)}</b></div></div></div>
+   <div className="card activityExecutive"><h2>Actividad reciente</h2>{activity.length?activity.map((e,i)=><div className="activityExecutiveRow" key={i}><span>{safeHour(e.time)}</span><b>{e.icon} {e.text}</b><em>{e.amount}</em></div>):<p>No hay actividad reciente.</p>}</div>
+  </div>
  </div>}
 
 function Employees(){const[employees,setEmployees]=useState([]);const[name,setName]=useState('');const[pin,setPin]=useState('');useEffect(()=>{load()},[]);async function load(){if(!supabase)return;const{data}=await supabase.from('employees').select('*').order('name');setEmployees(data||[])}async function add(){if(!name||!pin)return alert('Nombre y PIN');const color=EMP_COLORS[employees.length%EMP_COLORS.length];const{error}=await supabase.from('employees').insert({name,pin,role:'empleado',color,can_clock:true,active:true});if(error)alert(error.message);setName('');setPin('');load()}async function update(e,patch){const{error}=await supabase.from('employees').update(patch).eq('id',e.id);if(error)alert(error.message);load()}return <div className="card"><h2>Empleados</h2><div className="row"><input placeholder="Nuevo empleado" value={name} onChange={e=>setName(e.target.value)}/><input placeholder="PIN" value={pin} onChange={e=>setPin(e.target.value)}/><button onClick={add}>Añadir</button></div>{employees.map(e=><div className="employee" key={e.id}><span className="sq" style={{background:e.color}}></span><b>{e.name}</b><span>{e.active?'Activo':'Inactivo'}</span><input placeholder="Nuevo PIN" onBlur={ev=>ev.target.value&&update(e,{pin:ev.target.value})}/><button onClick={()=>update(e,{active:!e.active})}>{e.active?'Desactivar':'Activar'}</button></div>)}</div>}
