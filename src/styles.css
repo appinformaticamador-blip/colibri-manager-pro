@@ -160,3 +160,94 @@ input,select,textarea{background:#fbfdfd;border-color:#cfe1e5;color:var(--ink)}
 .employeeSummary>div,.employeeChip{background:#f6faf9!important;border:1px solid #d7e6e7!important}.scheduleModal{background:linear-gradient(145deg,#fff,#eef8f6)!important}.empbtn{background:#f2f8f7;color:var(--ink);border:1px solid #d8e8e9}.empbtn.selected{background:linear-gradient(135deg,#d9f1ec,#e7eefb)!important;color:var(--ink)!important;outline:3px solid var(--mint)}
 .login{background:radial-gradient(circle at 15% 20%,#fff4d7 0 12%,transparent 35%),radial-gradient(circle at 85% 15%,#dff0fb 0 12%,transparent 38%),linear-gradient(135deg,#e9f5f3,#f6f3fb 55%,#fff7e6)}.login .brand{color:var(--ink)}.login .card{backdrop-filter:blur(12px)}
 @media(max-width:900px){.erpShell{display:block}.erpSidebar{position:sticky;height:auto;padding:12px 14px;display:block;border-right:0;border-bottom:1px solid var(--line)}.erpSidebar>.brand,.sidebarFooter{display:none}.sideNav{display:flex;flex-direction:row;overflow-x:auto;margin:0;gap:8px;padding-bottom:4px}.sideNav button{min-width:max-content;width:auto;grid-template-columns:22px 1fr;padding:10px 12px}.mobileTop{display:block;padding:16px 16px 0}.mobileTop .brandMark{width:58px;height:60px}.mobileTop .brand img{width:54px;height:58px}.mobileTop .brand h1{font-size:23px}.page{padding:16px 12px 30px!important}.card{border-radius:18px}.scheduleFresh .scheduleTopButtons{padding:13px!important}}
+
+/* RC 3.3.10 — Contraste profesional y semántica visual */
+:root{
+ --text-main:#111827;
+ --text-heading:#24205f;
+ --text-muted:#5b6678;
+ --info:#2563eb;
+ --success:#147a43;
+ --danger:#d7193f;
+ --warning:#b26a00;
+ --panel-soft:#f8fbff;
+}
+
+body,.page,.card,.report,.aiCard,.serviceZone,.serviceKpis>div,.proKpi,.kpi,
+.scheduleModal,.employeeSummary>div,.employeeChip,.empbtn,input,select,textarea,table,td{
+ color:var(--text-main)!important;
+}
+
+h1,h2,h3,h4,h5,h6,.serviceZone h3,.aiCard h2,.scheduleFresh .scheduleTopButtons h2,
+.reportGrid b,.hero h2,.proHero h1,.serviceHeader h1{
+ color:var(--text-heading)!important;
+}
+
+p,li,label,.mutedText,.hero p,.syncMini span,.reportGrid span,.serviceKpis span,
+.proKpi span,.proKpi em,.kpi span,.scheduleModal p,.brand p,.sidebarFooter small{
+ color:var(--text-muted)!important;
+}
+
+.ok,.positive,.miniLine,.alertOk,.serviceKpis em,.serviceLive .positive,
+.proKpi .positive,.reportGrid .positive,.success,.status-ok{
+ color:var(--success)!important;
+}
+
+.bad,.negative,.error,.alertBad,.danger,.critical,.status-error{
+ color:var(--danger)!important;
+}
+
+.info,.recommendation,.advice,.hint,.status-info,.serviceZone h3{
+ color:var(--info)!important;
+}
+
+.warning,.status-warning{
+ color:var(--warning)!important;
+}
+
+/* Evita texto blanco heredado en paneles claros */
+.card *:not(button):not(.badge):not(.closedLabel):not(.closedCell):not(.empbtn.closedOption),
+.report *:not(button):not(.badge):not(.closedLabel),
+.aiCard *:not(button):not(.badge),
+.serviceKpis>div *:not(button),
+.serviceZone *:not(button):not(.tableCircle):not(.closedLabel),
+.scheduleModal *:not(button):not(.sq):not(.badge):not(.closedOption),
+.proKpi *:not(button),.kpi *:not(button){
+ text-shadow:none!important;
+}
+
+/* Jerarquía de estados en tarjetas KPI */
+.serviceKpis>div:nth-child(1) b,.serviceKpis>div:nth-child(1) em{color:var(--danger)!important}
+.serviceKpis>div:nth-child(2) b,.serviceKpis>div:nth-child(2) em{color:var(--success)!important}
+.serviceKpis>div:nth-child(3) b{color:var(--text-heading)!important}
+.serviceKpis>div:nth-child(3) em{color:var(--info)!important}
+
+/* Lectura IA del servicio */
+.aiCard,.serviceInsight,.serviceAi,.report{
+ background:linear-gradient(145deg,#ffffff,#f7fbff)!important;
+ border:1px solid #d7e2f0!important;
+}
+.aiCard p,.serviceInsight p,.serviceAi p{color:var(--text-main)!important}
+.aiCard strong,.serviceInsight strong,.serviceAi strong{color:var(--success)!important}
+.aiCard a,.serviceInsight a,.serviceAi a{color:var(--info)!important}
+
+/* Tablas y paneles de cálculo */
+table td,table th{color:var(--text-main)!important}
+th{color:var(--text-heading)!important}
+.reportGrid p,.syncMini span{background:var(--panel-soft)!important}
+
+/* Mantiene blanco únicamente donde hay fondo oscuro */
+button,.badge,.schedulePro th,.closedLabel,.closedCell,.empbtn.closedOption,
+.sideNav button.active,.scheduleVersion{color:#fff!important}
+button.active{color:var(--text-heading)!important;background:#fff!important}
+.sideNav button.active{color:#145c68!important}
+
+/* Navegación y accesibilidad móvil */
+.sideNav button{color:#34495e!important}
+.sideNav button.active{color:#155f67!important}
+.mobileTop,.erpSidebar{color:var(--text-main)!important}
+
+@media(max-width:900px){
+ body{background:linear-gradient(180deg,#f7fbff 0%,#eef7f7 100%)!important}
+ .serviceKpis>div,.proKpi,.kpi,.card{background:#fff!important}
+}
