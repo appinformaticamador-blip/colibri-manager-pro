@@ -327,28 +327,75 @@ function TicketModal({cabId,account,onClose}){
   </>}
  </div></div>
 }
+function serviceAccountName(account,index=0){
+ const candidates=[account?.cliente,account?.cliente_nombre,account?.nombre_cliente,account?.customer_name,account?.postit,account?.descripcion,account?.observaciones,account?.mesa_nombre,account?.nombre];
+ const real=candidates.find(v=>String(v||'').trim());
+ if(real)return String(real).trim();
+ if(account?.zona==='barra')return `Barra ${index+1}`;
+ return `Mesa ${account?.mesa_numero||account?.mesa||'-'}`;
+}
+function accountLabel(account,index=0){return account?.zona==='barra'?serviceAccountName(account,index):`Mesa ${account?.mesa_numero||account?.mesa||'-'}`}
+function accountArticleCount(detail){return (detail?.lines||[]).reduce((a,l)=>a+Number(l.cantidad||0),0)}
+function ServiceAccountList({accounts,onOpen,barDetails=new Map(),title='Cuentas abiertas'}){
+ const sorted=[...(accounts||[])].sort((a,b)=>minutesOpen(b.opened_at)-minutesOpen(a.opened_at));
+ return <section className="serviceListCard"><div className="serviceSectionTitle"><div><h2>{title}</h2><p>{sorted.length} cuentas · {money(sorted.reduce((a,o)=>a+Number(o.total||0),0))} pendientes</p></div></div>
+  <div className="serviceAccountList">{sorted.map((o,i)=>{const mins=minutesOpen(o.opened_at);const detail=barDetails.get(String(o.cab_id));const preview=(detail?.lines||[]).slice(0,3);return <button type="button" className={'serviceAccountRow '+tableTimeClass(mins)} key={o.cab_id||`${o.zona}-${i}`} onClick={()=>onOpen(o)}>
+   <div className="accountMain"><b>{accountLabel(o,i)}</b><span>{zoneLabel(o.zona)} · abierta hace {durationShort(mins)}</span>{preview.length>0&&<small>{preview.map(l=>`${Number(l.cantidad||0)}× ${productNameFromLine(l,detail.articles)}`).join(' · ')}</small>}</div>
+   <div className="accountNumbers"><b>{money(o.total)}</b><span>{detail?`${accountArticleCount(detail)} artículos`:'Ver contenido'}</span></div>
+  </button>})}{sorted.length===0&&<div className="serviceEmpty"><b>Sin cuentas abiertas</b><span>No hay actividad en esta zona ahora mismo.</span></div>}</div>
+ </section>
+}
+function ServiceBarPanel({accounts,onOpen,details}){
+ const sorted=[...(accounts||[])].sort((a,b)=>new Date(a.opened_at)-new Date(b.opened_at));
+ const total=sorted.reduce((a,o)=>a+Number(o.total||0),0);const oldest=sorted[0];
+ return <section className="barLivePanel"><div className="serviceSectionTitle"><div><span className="sectionEyebrow">BARRA LIVE</span><h2>Cuentas abiertas de barra</h2><p>Post-it y cuentas rápidas de NUMIER, tratadas como tickets activos.</p></div><div className="barSummary"><b>{sorted.length}</b><span>cuentas</span><strong>{money(total)}</strong></div></div>
+  {oldest&&<div className={'serviceAlert '+(minutesOpen(oldest.opened_at)>=60?'critical':minutesOpen(oldest.opened_at)>=30?'warning':'info')}><b>Cuenta más antigua:</b> {accountLabel(oldest,0)} · {durationShort(minutesOpen(oldest.opened_at))} · {money(oldest.total)}</div>}
+  <div className="barCards">{sorted.map((o,i)=>{const detail=details.get(String(o.cab_id));const lines=(detail?.lines||[]).slice(0,5);const mins=minutesOpen(o.opened_at);return <button type="button" className={'barAccountCard '+tableTimeClass(mins)} key={o.cab_id||i} onClick={()=>onOpen(o)}>
+   <div className="barCardTop"><div><span>CUENTA DE BARRA</span><h3>{accountLabel(o,i)}</h3></div><b>{money(o.total)}</b></div>
+   <div className="barCardMeta"><span>⏱ {durationShort(mins)}</span><span>🧾 {detail?`${accountArticleCount(detail)} uds.`:'Cargando...'}</span></div>
+   <div className="barPreview">{lines.map(l=><p key={l.line_key||l.id}><span>{Number(l.cantidad||0)}× {productNameFromLine(l,detail.articles)}</span><b>{money(l.importe)}</b></p>)}{detail&&!lines.length&&<p><span>Sin líneas sincronizadas</span></p>}{!detail&&<p><span>Cargando contenido...</span></p>}</div>
+   <div className="barCardAction">Abrir ticket completo →</div>
+  </button>})}{!sorted.length&&<div className="serviceEmpty wide"><b>Barra sin cuentas abiertas</b><span>Cuando NUMIER abra un post-it o cuenta rápida aparecerá aquí automáticamente.</span></div>}</div>
+ </section>
+}
+function ServiceAlerts({open,barra,occTerrace,occSalon}){
+ const alerts=[];const old=[...open].sort((a,b)=>minutesOpen(b.opened_at)-minutesOpen(a.opened_at))[0];
+ if(old&&minutesOpen(old.opened_at)>=90)alerts.push({type:'critical',text:`${accountLabel(old,0)} lleva ${durationShort(minutesOpen(old.opened_at))} abierta.`});
+ else if(old&&minutesOpen(old.opened_at)>=60)alerts.push({type:'warning',text:`Revisar ${accountLabel(old,0)}: lleva ${durationShort(minutesOpen(old.opened_at))} abierta.`});
+ if(occTerrace>=80)alerts.push({type:'info',text:`Terraza al ${occTerrace}% de ocupación.`});
+ if(occSalon>=80)alerts.push({type:'info',text:`Salón al ${occSalon}% de ocupación.`});
+ if(barra.length>=4)alerts.push({type:'warning',text:`Barra acumula ${barra.length} cuentas abiertas.`});
+ if(!alerts.length)alerts.push({type:'positive',text:'Servicio estable. No hay alertas operativas relevantes.'});
+ return <div className="serviceAlerts">{alerts.map((a,i)=><div className={'serviceAlert '+a.type} key={i}>{a.text}</div>)}</div>
+}
 function EstadoServicio(){
  const[state,setState]=useState({open:[],status:null,error:null});
  const[daily,setDaily]=useState(null);
  const[selected,setSelected]=useState(null);
  const[loading,setLoading]=useState(false);
+ const[view,setView]=useState('plano');
+ const[barDetails,setBarDetails]=useState(new Map());
  useEffect(()=>{load();const t=setInterval(load,15000);return()=>clearInterval(t)},[]);
- async function load(){setLoading(true);const [service,sales]=await Promise.all([loadServiceState(),loadSalesForDate(today())]);setState(service);setDaily(sales.daily);setLoading(false)}
+ async function load(){setLoading(true);const [service,sales]=await Promise.all([loadServiceState(),loadSalesForDate(today())]);setState(service);setDaily(sales.daily);const bar=(service.open||[]).filter(o=>o.zona==='barra');const detailPairs=await Promise.all(bar.slice(0,30).map(async o=>[String(o.cab_id),await loadTicketFull(o.cab_id)]));setBarDetails(new Map(detailPairs));setLoading(false)}
  const open=state.open||[];
- const openByMesa=new Map(open.filter(o=>Number(o.mesa_numero)>=1&&Number(o.mesa_numero)<=30).map(o=>[Number(o.mesa_numero),o]));
+ const openByMesa=new Map(open.filter(o=>Number(o.mesa_numero)>=1&&Number(o.mesa_numero)<=30&&o.zona!=='barra').map(o=>[Number(o.mesa_numero),o]));
  const terrace=open.filter(o=>o.zona==='terraza');const salon=open.filter(o=>o.zona==='salon');const barra=open.filter(o=>o.zona==='barra');
  const totalPending=open.reduce((a,o)=>a+Number(o.total||0),0);
- const closedToday=Number(daily?.total||0);
- const potential=closedToday+totalPending;
+ const closedToday=Number(daily?.total||0);const potential=closedToday+totalPending;
  const avgMin=open.length?Math.round(open.reduce((a,o)=>a+minutesOpen(o.opened_at),0)/open.length):0;
+ const oldest=open.length?Math.max(...open.map(o=>minutesOpen(o.opened_at))):0;
+ const largest=open.length?Math.max(...open.map(o=>Number(o.total||0))):0;
  const occTerrace=Math.round((terrace.length/15)*100);const occSalon=Math.round((salon.length/8)*100);const occTotal=Math.round((open.filter(o=>o.zona!=='barra').length/23)*100);
- const last=state.status?.updated_at||open[0]?.last_seen_at;
- const forecast=serviceForecast({closedToday,totalPending,openCount:open.length,avgMin});
- const timeColor=avgMin>=90?'danger':avgMin>=60?'warn':avgMin>=30?'notice':'fresh';
- return <div className="servicePage"><div className="serviceHeader"><div><span className="pill">Colibrí ERP PRO 3.1.0 RC2 · Beta</span><h1>Estado del Servicio</h1><p>Restaurante en directo · mesas abiertas, zonas y pendiente de cobro.</p></div><div className="serviceLive"><b>🟢 EN DIRECTO</b><span>{last?secondsAgo(last):'sin datos'}</span><button onClick={load}>{loading?'Actualizando...':'Actualizar'}</button></div></div>{state.error&&<div className="alertBad">Error: {state.error}</div>}
- <div className="serviceKpis enhanced"><div><span>Ocupación total</span><b>{open.filter(o=>o.zona!=='barra').length} / 23</b><em>{occTotal}%</em><OccupancyBar value={occTotal}/></div><div><span>Vendido hoy</span><b>{money(closedToday)}</b><em>facturación cerrada</em></div><div><span>Pendiente de cobro</span><b>{money(totalPending)}</b><em>{open.length} cuentas abiertas</em></div><div><span>Potencial inmediato</span><b>{money(potential)}</b><em>vendido + pendiente</em></div><div className={timeColor}><span>Tiempo medio</span><b>{durationShort(avgMin)}</b><em>cuentas abiertas</em></div></div>
+ const last=state.status?.updated_at||open[0]?.last_seen_at;const forecast=serviceForecast({closedToday,totalPending,openCount:open.length,avgMin});
+ return <div className="servicePage"><div className="serviceHeader"><div><span className="pill">Colibrí ERP PRO · Servicio LIVE</span><h1>Estado del Servicio</h1><p>Centro operativo en tiempo real: mesas, barra, tickets activos y alertas.</p></div><div className="serviceLive"><b>● EN DIRECTO</b><span>{last?secondsAgo(last):'sin datos'}</span><button onClick={load}>{loading?'Actualizando...':'Actualizar ahora'}</button></div></div>{state.error&&<div className="alertBad">Error: {state.error}</div>}
+ <div className="serviceViewTabs"><button className={view==='plano'?'active':''} onClick={()=>setView('plano')}>▦ Plano</button><button className={view==='lista'?'active':''} onClick={()=>setView('lista')}>☷ Listado</button><button className={view==='barra'?'active':''} onClick={()=>setView('barra')}>▰ Barra <span>{barra.length}</span></button></div>
+ <div className="serviceKpis livePro"><div><span>Cuentas abiertas</span><b>{open.length}</b><em>{money(totalPending)} pendientes</em></div><div><span>Ocupación</span><b>{occTotal}%</b><em>{open.filter(o=>o.zona!=='barra').length} de 23 mesas</em><OccupancyBar value={occTotal}/></div><div><span>Vendido hoy</span><b>{money(closedToday)}</b><em>facturación cerrada</em></div><div><span>Potencial inmediato</span><b>{money(potential)}</b><em>vendido + pendiente</em></div><div><span>Tiempo medio</span><b>{durationShort(avgMin)}</b><em>más antigua: {durationShort(oldest)}</em></div><div><span>Cuenta mayor</span><b>{money(largest)}</b><em>{barra.length} en barra</em></div></div>
+ <ServiceAlerts open={open} barra={barra} occTerrace={occTerrace} occSalon={occSalon}/>
  <div className="card serviceAi"><h2>🤖 Lectura IA del servicio</h2><p><b>{forecast.tone}</b>. {forecast.text}</p><div className="serviceFormula"><span>Vendido: <b>{money(closedToday)}</b></span><span>+</span><span>Pendiente: <b>{money(totalPending)}</b></span><span>=</span><span>Potencial: <b>{money(potential)}</b></span></div></div>
- <div className="serviceLayout"><main><ServiceZoneMap title="TERRAZA (00-19)" tables={TERRACE_TABLES} openByMesa={openByMesa} onOpen={setSelected}/><ServiceZoneMap title="SALÓN / BARRA (20-30)" tables={SALON_TABLES} openByMesa={openByMesa} onOpen={setSelected}/></main><aside className="servicePanel"><div className="sideCard"><h3>Ocupación por zona</h3><p><span>Terraza</span><b>{terrace.length}/15</b><em>{occTerrace}%</em></p><OccupancyBar value={occTerrace}/><p><span>Salón</span><b>{salon.length}/8</b><em>{occSalon}%</em></p><OccupancyBar value={occSalon}/><p><span>Barra</span><b>{barra.length}</b><em>cuentas</em></p></div><div className="sideCard"><h3>Cuentas abiertas</h3><p><span>Terraza</span><b>{terrace.length}</b><em>{money(terrace.reduce((a,o)=>a+Number(o.total||0),0))}</em></p><p><span>Salón</span><b>{salon.length}</b><em>{money(salon.reduce((a,o)=>a+Number(o.total||0),0))}</em></p><p><span>Barra</span><b>{barra.length}</b><em>{money(barra.reduce((a,o)=>a+Number(o.total||0),0))}</em></p><p className="total"><span>Total pendiente</span><b></b><em>{money(totalPending)}</em></p></div><div className="sideCard"><h3>Últimas aperturas</h3>{open.slice().sort((a,b)=>new Date(b.opened_at)-new Date(a.opened_at)).slice(0,5).map(o=><p key={o.cab_id}><span>{o.zona==='barra'?'Barra':`Mesa ${o.mesa_numero}`}</span><b>{money(o.total)}</b><em>{durationShort(minutesOpen(o.opened_at))}</em></p>)}{open.length===0&&<p><span>No hay cuentas abiertas</span></p>}</div><div className="sideCard"><h3>Auditoría hoy</h3>{['N','X','G'].map(st=>{const rows=(state.audit||[]).filter(a=>a.estado===st);const sum=rows.reduce((a,r)=>a+Number(r.total||0),0);return <p key={st}><span>{st==='N'?'Borradas manualmente':st==='X'?'Anuladas':'Gastos'}</span><b>{rows.length}</b><em>{money(sum)}</em></p>})}</div><div className="sideCard legend"><h3>Leyenda</h3><p><i className="dot free"></i> Libre</p><p><i className="dot open"></i> Abierta &lt;30 min</p><p><i className="dot notice"></i> 30-60 min</p><p><i className="dot warn"></i> 60-90 min</p><p><i className="dot danger"></i> +90 min</p></div><div className="sideCard about"><h3>Software</h3><p><b>Colibrí ERP PRO</b><br/>Versión 3.1.0 RC2 · Beta</p><p>Desarrollado por<br/><b>C.G. 21 S.L.</b><br/>C/ Amador de los Ríos, 16<br/>41003 Sevilla<br/>☎ 954 533 502</p></div></aside></div><TicketModal cabId={selected?.cab_id} account={selected} onClose={()=>setSelected(null)}/></div>
+ {view==='barra'&&<ServiceBarPanel accounts={barra} onOpen={setSelected} details={barDetails}/>} 
+ {view==='lista'&&<div className="serviceLists"><ServiceAccountList accounts={barra} onOpen={setSelected} barDetails={barDetails} title="Barra"/><ServiceAccountList accounts={[...terrace,...salon]} onOpen={setSelected} title="Mesas abiertas"/></div>}
+ {view==='plano'&&<><ServiceBarPanel accounts={barra} onOpen={setSelected} details={barDetails}/><div className="serviceLayout"><main><ServiceZoneMap title="TERRAZA (01-19)" tables={TERRACE_TABLES} openByMesa={openByMesa} onOpen={setSelected}/><ServiceZoneMap title="SALÓN (20-30)" tables={SALON_TABLES} openByMesa={openByMesa} onOpen={setSelected}/></main><aside className="servicePanel"><div className="sideCard"><h3>Ocupación por zona</h3><p><span>Terraza</span><b>{terrace.length}/15</b><em>{occTerrace}%</em></p><OccupancyBar value={occTerrace}/><p><span>Salón</span><b>{salon.length}/8</b><em>{occSalon}%</em></p><OccupancyBar value={occSalon}/><p><span>Barra</span><b>{barra.length}</b><em>{money(barra.reduce((a,o)=>a+Number(o.total||0),0))}</em></p></div><div className="sideCard"><h3>Actividad actual</h3>{open.slice().sort((a,b)=>new Date(b.opened_at)-new Date(a.opened_at)).slice(0,10).map((o,i)=><button className="activityRow" key={o.cab_id||i} onClick={()=>setSelected(o)}><span>{accountLabel(o,i)}</span><b>{money(o.total)}</b><em>{durationShort(minutesOpen(o.opened_at))}</em></button>)}{!open.length&&<p><span>No hay cuentas abiertas</span></p>}</div><div className="sideCard"><h3>Auditoría hoy</h3>{['N','X','G'].map(st=>{const rows=(state.audit||[]).filter(a=>a.estado===st);const sum=rows.reduce((a,r)=>a+Number(r.total||0),0);return <p key={st}><span>{st==='N'?'Borradas manualmente':st==='X'?'Anuladas':'Gastos'}</span><b>{rows.length}</b><em>{money(sum)}</em></p>})}</div><div className="sideCard legend"><h3>Leyenda</h3><p><i className="dot free"></i> Libre</p><p><i className="dot open"></i> Abierta &lt;30 min</p><p><i className="dot notice"></i> 30-60 min</p><p><i className="dot warn"></i> 60-90 min</p><p><i className="dot danger"></i> +90 min</p></div></aside></div></>}
+ <TicketModal cabId={selected?.cab_id} account={selected} onClose={()=>setSelected(null)}/></div>
 }
 
 function DailyReport({summary,lines,tickets,clockRows,period}){const topQty=productRank(lines,'qty')[0];const topMoney=productRank(lines,'total')[0];const totalStaffHours=(clockRows||[]).filter(r=>String(r.type).toLowerCase()==='entrada').length;return <div className="card report"><h2>🧾 Informe diario / periodo</h2><div className="reportGrid"><p><span>Ventas</span><b>{money(summary.total)}</b></p><p><span>Tickets</span><b>{summary.tickets}</b></p><p><span>Ticket medio</span><b>{money(summary.ticket_medio)}</b></p><p><span>Producto más vendido</span><b>{topQty?topQty.name:'-'}</b></p><p><span>Mayor facturación</span><b>{topMoney?topMoney.name:'-'}</b></p><p><span>Coste hora</span><b>7 €/h</b></p></div><button onClick={()=>navigator.clipboard.writeText(`INFORME COLIBRÍ ERP\n${period.label}\nVentas: ${money(summary.total)}\nTickets: ${summary.tickets}\nTicket medio: ${money(summary.ticket_medio)}\nEfectivo: ${money(summary.efectivo)}\nTarjeta: ${money(summary.tarjeta)}\nProducto más vendido: ${topQty?topQty.name:'-'}\nMayor facturación: ${topMoney?topMoney.name:'-'}`)}>Copiar informe</button><p className="mutedText">El informe automático de las 00:00 queda preparado a nivel de datos; de momento también puedes generarlo y copiarlo desde aquí.</p></div>}
