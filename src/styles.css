@@ -478,3 +478,13 @@ button.active{color:var(--text-heading)!important;background:#fff!important}
  .executiveDashboard{padding-bottom:84px}
  .dashboardActivityLink{grid-template-columns:50px 1fr auto 14px!important;font-size:13px!important}
 }
+
+/* RC 3.6.0 · Costes y Rentabilidad */
+.profitPage{display:flex;flex-direction:column;gap:16px}.profitHero{background:linear-gradient(135deg,#eef6ff,#f5f0ff 52%,#effaf3)}
+.profitTabs{display:flex;gap:8px;overflow:auto;padding:4px 0}.profitTabs button{white-space:nowrap;background:#f1effa;color:#33205f;border:1px solid #dad2ef}.profitTabs button.active{background:#5d4a92;color:#fff;border-color:#5d4a92}
+.profitKpis .kpi b{font-size:1.75rem}.profitInvoices{display:grid;grid-template-columns:minmax(300px,.8fr) minmax(320px,1fr);gap:16px}.profitInvoices>.wide{grid-column:1/-1}
+.formGrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:12px 0}.formGrid label{display:flex;flex-direction:column;gap:6px;font-weight:700;color:#35245c}.formGrid .wideField{grid-column:1/-1}.lineForm{grid-template-columns:repeat(3,minmax(0,1fr))}
+.invoiceList{display:flex;flex-direction:column;gap:8px;max-height:490px;overflow:auto}.invoiceList>button{display:grid;grid-template-columns:1fr auto auto;align-items:center;gap:10px;text-align:left;background:#f8f7fc;color:#251f37;border:1px solid #e3dff0}.invoiceList>button.selected{border-color:#5d4a92;box-shadow:0 0 0 2px #e3dcf6}.invoiceList span{display:flex;flex-direction:column}.invoiceList small,td small{display:block;color:#696176;margin-top:3px}.invoiceList em{font-size:.75rem;font-style:normal;padding:4px 8px;border-radius:999px}.statusOk{background:#dff3e7;color:#195c38}.statusPending{background:#fff0c7;color:#754e00}
+.profitAlert,.supplierCompare{display:flex;justify-content:space-between;gap:12px;padding:12px 0;border-bottom:1px solid #ece8f3}.profitAlert div{display:flex;flex-direction:column}.profitAlert small,.supplierCompare span{color:#696176}.profitAlert strong{color:#b42318}.positiveText{color:#17633a!important}.infoText{color:#1b5fa7!important}.criticalText{color:#b42318!important}.profitPage table{min-width:780px}.profitPage .card{overflow:auto}
+@media(max-width:900px){.profitInvoices{grid-template-columns:1fr}.formGrid,.lineForm{grid-template-columns:1fr 1fr}.profitTabs{position:relative;z-index:1}.profitPage table{font-size:.86rem}}
+@media(max-width:560px){.formGrid,.lineForm{grid-template-columns:1fr}.invoiceList>button{grid-template-columns:1fr auto}.invoiceList em{grid-column:1/-1;justify-self:start}.profitHero{align-items:flex-start}.profitHero .row{width:100%}.profitHero .row button{flex:1}}
