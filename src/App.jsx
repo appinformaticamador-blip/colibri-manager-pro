@@ -368,14 +368,16 @@ function ServiceAlerts({open,barra,occTerrace,occSalon}){
  if(!alerts.length)alerts.push({type:'positive',text:'Servicio estable. No hay alertas operativas relevantes.'});
  return <div className="serviceAlerts">{alerts.map((a,i)=><div className={'serviceAlert '+a.type} key={i}>{a.text}</div>)}</div>
 }
-function EstadoServicio(){
+function EstadoServicio({initialView='plano',focusAccount=null}){
  const[state,setState]=useState({open:[],status:null,error:null});
  const[daily,setDaily]=useState(null);
  const[selected,setSelected]=useState(null);
  const[loading,setLoading]=useState(false);
- const[view,setView]=useState('plano');
+ const[view,setView]=useState(initialView||'plano');
  const[barDetails,setBarDetails]=useState(new Map());
+ useEffect(()=>{setView(initialView||'plano')},[initialView]);
  useEffect(()=>{load();const t=setInterval(load,15000);return()=>clearInterval(t)},[]);
+ useEffect(()=>{if(!focusAccount)return;const match=(state.open||[]).find(o=>String(o.cab_id)===String(focusAccount.cab_id)||String(o.mesa_numero)===String(focusAccount.mesa_numero));if(match)setSelected(match)},[focusAccount,state.open]);
  async function load(){setLoading(true);const [service,sales]=await Promise.all([loadServiceState(),loadSalesForDate(today())]);setState(service);setDaily(sales.daily);const bar=(service.open||[]).filter(o=>o.zona==='barra');const detailPairs=await Promise.all(bar.slice(0,30).map(async o=>[String(o.cab_id),await loadTicketFull(o.cab_id)]));setBarDetails(new Map(detailPairs));setLoading(false)}
  const open=state.open||[];
  const openByMesa=new Map(open.filter(o=>Number(o.mesa_numero)>=1&&Number(o.mesa_numero)<=30&&o.zona!=='barra').map(o=>[Number(o.mesa_numero),o]));
@@ -728,7 +730,14 @@ class ModuleErrorBoundary extends React.Component{
 function App(){const host=location.hostname;const onlyClock=host.startsWith('fichar.')||location.pathname.includes('fichar');const [authed,setAuthed]=useState(false);return <>{onlyClock?<ClockPage/>:<>{!authed?<Login onOk={()=>setAuthed(true)}/>:<Manager/>}</>}</>}
 function Login({onOk}){const[pin,setPin]=useState('');return <main className="login"><Brand/><div className="card narrow"><h2>Acceso Manager</h2><input placeholder="Clave gerente" type="password" value={pin} onChange={e=>setPin(e.target.value)}/><button onClick={()=>pin===ADMIN_PIN?onOk():alert('Clave incorrecta')}>Entrar</button><a href="/fichar" className="muted">Ir a fichaje empleados</a></div></main>}
 function Brand(){return <div className="brand"><div className="brandMark"><img src="/colibri-brand.png" onError={e=>e.currentTarget.style.display='none'}/></div><div><h1>Colibrí <span>ERP</span></h1><p>Brasería El Colibrí</p></div></div>}
-function Manager(){const[tab,setTab]=useState('dashboard');const tabs=[['dashboard','⌂','Dashboard'],['servicio','◉','Servicio'],['inteligencia','✦','Inteligencia'],['tpv','▣','TPV'],['gestoria','▤','Gestoría'],['empleados','♟','Empleados'],['fichajes','◷','Fichajes'],['cuadrantes','▦','Cuadrantes'],['comparador','⇄','Comparador'],['config','⚙','Configuración']];return <div className="erpShell"><aside className="erpSidebar"><Brand/><nav className="sideNav">{tabs.map(([id,icon,label])=><button className={tab===id?'active':''} onClick={()=>setTab(id)} key={id}><span>{icon}</span><b>{label}</b></button>)}</nav><div className="sidebarFooter"><div className="userAvatar">A</div><div><b>Alfonso</b><small>Gerencia</small></div></div></aside><main className="erpMain"><div className="mobileTop"><Brand/></div><section className="page"><ModuleErrorBoundary key={tab} name={tab}>{tab==='dashboard'&&<Dashboard/>}{tab==='servicio'&&<EstadoServicio/>}{tab==='inteligencia'&&<BusinessIntelligence/>}{tab==='empleados'&&<Employees/>}{tab==='fichajes'&&<ClockPanel/>}{tab==='cuadrantes'&&<Schedule/>}{tab==='comparador'&&<Compare/>}{tab==='tpv'&&<TPV/>}{tab==='gestoria'&&<Gestoria/>}{tab==='config'&&<Settings/>}</ModuleErrorBoundary></section></main></div>}
+function Manager(){
+ const initial=history.state?.colibriRoute||{tab:'dashboard',section:null,payload:null};
+ const[route,setRoute]=useState(initial);
+ const tabs=[['dashboard','⌂','Dashboard'],['servicio','◉','Servicio'],['inteligencia','✦','Inteligencia'],['tpv','▣','TPV'],['gestoria','▤','Gestoría'],['empleados','♟','Empleados'],['fichajes','◷','Fichajes'],['cuadrantes','▦','Cuadrantes'],['comparador','⇄','Comparador'],['config','⚙','Configuración']];
+ useEffect(()=>{const onPop=e=>setRoute(e.state?.colibriRoute||{tab:'dashboard',section:null,payload:null});addEventListener('popstate',onPop);return()=>removeEventListener('popstate',onPop)},[]);
+ function navigate(tab,section=null,payload=null,{replace=false}={}){const next={tab,section,payload};setRoute(next);const fn=replace?'replaceState':'pushState';history[fn]({...(history.state||{}),colibriRoute:next},'',location.href);requestAnimationFrame(()=>scrollTo({top:0,behavior:'smooth'}));}
+ const tab=route.tab;
+ return <div className="erpShell"><aside className="erpSidebar"><Brand/><nav className="sideNav">{tabs.map(([id,icon,label])=><button className={tab===id?'active':''} onClick={()=>navigate(id)} key={id}><span>{icon}</span><b>{label}</b></button>)}</nav><div className="sidebarFooter"><div className="userAvatar">A</div><div><b>Alfonso</b><small>Gerencia</small></div></div></aside><main className="erpMain"><div className="mobileTop"><Brand/></div><section className="page"><ModuleErrorBoundary key={`${tab}-${route.section||''}-${JSON.stringify(route.payload||{})}`} name={tab}>{tab==='dashboard'&&<Dashboard onNavigate={navigate}/>} {tab==='servicio'&&<EstadoServicio initialView={route.section||'plano'} focusAccount={route.payload}/>} {tab==='inteligencia'&&<BusinessIntelligence/>}{tab==='empleados'&&<Employees/>}{tab==='fichajes'&&<ClockPanel/>}{tab==='cuadrantes'&&<Schedule/>}{tab==='comparador'&&<Compare/>}{tab==='tpv'&&<TPV/>}{tab==='gestoria'&&<Gestoria/>}{tab==='config'&&<Settings/>}</ModuleErrorBoundary></section></main></div>}
 
 function getGreeting(){const h=new Date().getHours();if(h<12)return 'Buenos días';if(h<20)return 'Buenas tardes';return 'Buenas noches'}
 function pctDiff(a,b){a=Number(a||0);b=Number(b||0);if(!b)return null;return ((a-b)/b)*100}
@@ -782,7 +791,7 @@ function dashboardRecommendation({projected,objective,barra,oldest,occTerrace,to
  if(projected>summary.total&&objective>0)return `Con el ritmo actual, la previsión de cierre es de ${money(projected)}.`;
  return 'Servicio estable. Mantén el ritmo actual y vigila nuevas aperturas.';
 }
-function Dashboard(){
+function Dashboard({onNavigate}){
  const[date,setDate]=useState(today());
  const[state,setState]=useState({tickets:[],lines:[],articles:new Map(),clock:[],sync:null,syncStatus:null,prev:null,avgSameDay:null,goal:null,service:{open:[],audit:[]},loading:true,error:null});
  useEffect(()=>{load();const t=setInterval(load,15000);return()=>clearInterval(t)},[date]);
@@ -826,7 +835,9 @@ function Dashboard(){
  const recommendation=dashboardRecommendation({projected,objective,barra,oldest,occTerrace,totalPending,summary});
  const recentOpen=open.slice().sort((a,b)=>new Date(b.opened_at)-new Date(a.opened_at)).slice(0,5);
  const latestTickets=(state.tickets||[]).slice().sort((a,b)=>new Date(b.hora||b.created_at)-new Date(a.hora||a.created_at)).slice(0,5);
- const activity=[...recentOpen.map((o,i)=>({time:o.opened_at,icon:'●',text:`${accountLabel(o,i)} abierta`,amount:money(o.total)})),...latestTickets.map(t=>({time:t.hora||t.created_at,icon:'✓',text:`Ticket ${t.numdoc||t.cab_id||''} cobrado`,amount:money(t.total)}))].sort((a,b)=>new Date(b.time)-new Date(a.time)).slice(0,6);
+ const activity=[...recentOpen.map((o,i)=>({time:o.opened_at,icon:'●',text:`${accountLabel(o,i)} abierta`,amount:money(o.total),target:{tab:'servicio',section:o.zona==='barra'?'barra':'lista',payload:{cab_id:o.cab_id,mesa_numero:o.mesa_numero}}})),...latestTickets.map(t=>({time:t.hora||t.created_at,icon:'✓',text:`Ticket ${t.numdoc||t.cab_id||''} cobrado`,amount:money(t.total),target:{tab:'tpv'}}))].sort((a,b)=>new Date(b.time)-new Date(a.time)).slice(0,6);
+ const go=(tab,section=null,payload=null)=>onNavigate?.(tab,section,payload);
+ const keyGo=(e,tab,section=null,payload=null)=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();go(tab,section,payload)}};
  const indexLabel=index>=90?'Excelente':index>=75?'Bien':index>=55?'Vigilancia':'Atención';
  return <div className="executiveDashboard">
   <div className={'executiveHero '+business.tone}>
@@ -835,21 +846,22 @@ function Dashboard(){
   </div>
   {state.error&&<div className="card error">{state.error}</div>}
   <div className="executiveKpis">
-   <div className="execKpi sales"><span>Ventas hoy</span><b>{money(summary.total)}</b><em>{formatPct(vsPrev)} vs sábado/semana anterior</em></div>
-   <div className="execKpi pending"><span>Pendiente de cobro</span><b>{money(totalPending)}</b><em>{open.length} cuentas abiertas</em></div>
-   <div className="execKpi accounts"><span>Cuentas activas</span><b>{open.length}</b><em>{terrace.length} terraza · {salon.length} salón · {barra.length} barra</em></div>
-   <div className="execKpi occupancy"><span>Ocupación mesas</span><b>{occTotal}%</b><em>Terraza {occTerrace}% · Salón {occSalon}%</em></div>
+   <div className="execKpi sales dashboardLink" role="button" tabIndex="0" onClick={()=>go('tpv')} onKeyDown={e=>keyGo(e,'tpv')}><span>Ventas hoy</span><b>{money(summary.total)}</b><em>{formatPct(vsPrev)} vs sábado/semana anterior</em><small>Ver TPV →</small></div>
+   <div className="execKpi pending dashboardLink" role="button" tabIndex="0" onClick={()=>go('servicio','lista')} onKeyDown={e=>keyGo(e,'servicio','lista')}><span>Pendiente de cobro</span><b>{money(totalPending)}</b><em>{open.length} cuentas abiertas</em><small>Ver cuentas →</small></div>
+   <div className="execKpi accounts dashboardLink" role="button" tabIndex="0" onClick={()=>go('servicio','lista')} onKeyDown={e=>keyGo(e,'servicio','lista')}><span>Cuentas activas</span><b>{open.length}</b><em>{terrace.length} terraza · {salon.length} salón · {barra.length} barra</em><small>Ver listado →</small></div>
+   <div className="execKpi occupancy dashboardLink" role="button" tabIndex="0" onClick={()=>go('servicio','plano')} onKeyDown={e=>keyGo(e,'servicio','plano')}><span>Ocupación mesas</span><b>{occTotal}%</b><em>Terraza {occTerrace}% · Salón {occSalon}%</em><small>Ver plano →</small></div>
   </div>
   <div className="executiveColumns">
-   <div className="card attentionCenter"><div className="row between"><h2>⚠ Centro de atención</h2><span className="attentionCount">{business.alerts.filter(a=>a.level!=='positive').length}</span></div>{business.alerts.map((a,i)=><div className={'attentionItem '+a.level} key={i}><span>{a.icon}</span><div><b>{a.title}</b><p>{a.text}</p></div></div>)}</div>
-   <div className="card colibriScore"><h2>Índice Colibrí</h2><div className={'scoreCircle '+(index>=90?'excellent':index>=75?'good':index>=55?'watch':'risk')}><b>{index}</b><span>/100</span></div><h3>{indexLabel}</h3><p>Resume ventas, ocupación, antigüedad de cuentas y alertas operativas.</p></div>
-   <div className="card aiExecutive"><h2>💡 Recomendación</h2><p>{recommendation}</p><div className="forecastLine"><span>Previsión de cierre</span><b>{money(projected)}</b></div><div className="forecastLine"><span>Objetivo inteligente</span><b>{money(objective)}</b></div></div>
+   <div className="card attentionCenter dashboardLink" role="button" tabIndex="0" onClick={()=>go('servicio','lista')} onKeyDown={e=>keyGo(e,'servicio','lista')}><div className="row between"><h2>⚠ Centro de atención</h2><span className="attentionCount">{business.alerts.filter(a=>a.level!=='positive').length}</span></div>{business.alerts.map((a,i)=><div className={'attentionItem '+a.level} key={i}><span>{a.icon}</span><div><b>{a.title}</b><p>{a.text}</p></div></div>)}</div>
+   <div className="card colibriScore dashboardLink" role="button" tabIndex="0" onClick={()=>go('inteligencia')} onKeyDown={e=>keyGo(e,'inteligencia')}><h2>Índice Colibrí</h2><div className={'scoreCircle '+(index>=90?'excellent':index>=75?'good':index>=55?'watch':'risk')}><b>{index}</b><span>/100</span></div><h3>{indexLabel}</h3><p>Resume ventas, ocupación, antigüedad de cuentas y alertas operativas.</p></div>
+   <div className="card aiExecutive dashboardLink" role="button" tabIndex="0" onClick={()=>go('inteligencia')} onKeyDown={e=>keyGo(e,'inteligencia')}><h2>💡 Recomendación</h2><p>{recommendation}</p><div className="forecastLine"><span>Previsión de cierre</span><b>{money(projected)}</b></div><div className="forecastLine"><span>Objetivo inteligente</span><b>{money(objective)}</b></div></div>
   </div>
   <div className="executiveColumns lower">
-   <div className="card zoneSnapshot"><h2>Estado por zonas</h2><div className="zoneRow"><span>Terraza</span><b>{terrace.length}/15</b><em>{occTerrace}%</em></div><OccupancyBar value={occTerrace}/><div className="zoneRow"><span>Salón</span><b>{salon.length}/8</b><em>{occSalon}%</em></div><OccupancyBar value={occSalon}/><div className="zoneRow"><span>Barra</span><b>{barra.length} cuentas</b><em>{money(barra.reduce((a,o)=>a+Number(o.total||0),0))}</em></div></div>
-   <div className="card daySummary"><h2>Resumen del día</h2><div className="summaryTiles"><div><span>Tickets</span><b>{summary.tickets}</b></div><div><span>Ticket medio</span><b>{money(summary.ticket_medio)}</b></div><div><span>Personal ahora</span><b>{working.length}</b></div><div><span>Cuenta más antigua</span><b>{durationShort(oldest)}</b></div></div></div>
-   <div className="card activityExecutive"><h2>Actividad reciente</h2>{activity.length?activity.map((e,i)=><div className="activityExecutiveRow" key={i}><span>{safeHour(e.time)}</span><b>{e.icon} {e.text}</b><em>{e.amount}</em></div>):<p>No hay actividad reciente.</p>}</div>
+   <div className="card zoneSnapshot dashboardLink" role="button" tabIndex="0" onClick={()=>go('servicio','plano')} onKeyDown={e=>keyGo(e,'servicio','plano')}><h2>Estado por zonas</h2><div className="zoneRow"><span>Terraza</span><b>{terrace.length}/15</b><em>{occTerrace}%</em></div><OccupancyBar value={occTerrace}/><div className="zoneRow"><span>Salón</span><b>{salon.length}/8</b><em>{occSalon}%</em></div><OccupancyBar value={occSalon}/><div className="zoneRow"><span>Barra</span><b>{barra.length} cuentas</b><em>{money(barra.reduce((a,o)=>a+Number(o.total||0),0))}</em></div></div>
+   <div className="card daySummary"><h2>Resumen del día</h2><div className="summaryTiles"><div className="dashboardLink" role="button" tabIndex="0" onClick={()=>go('tpv')}><span>Tickets</span><b>{summary.tickets}</b></div><div className="dashboardLink" role="button" tabIndex="0" onClick={()=>go('tpv')}><span>Ticket medio</span><b>{money(summary.ticket_medio)}</b></div><div className="dashboardLink" role="button" tabIndex="0" onClick={()=>go('fichajes')}><span>Personal ahora</span><b>{working.length}</b></div><div className="dashboardLink" role="button" tabIndex="0" onClick={()=>go('servicio','lista')}><span>Cuenta más antigua</span><b>{durationShort(oldest)}</b></div></div></div>
+   <div className="card activityExecutive"><h2>Actividad reciente</h2>{activity.length?activity.map((e,i)=><button type="button" className="activityExecutiveRow dashboardActivityLink" key={i} onClick={()=>go(e.target.tab,e.target.section,e.target.payload)}><span>{safeHour(e.time)}</span><b>{e.icon} {e.text}</b><em>{e.amount}</em><i>›</i></button>):<p>No hay actividad reciente.</p>}</div>
   </div>
+  <nav className="dashboardQuickActions" aria-label="Acciones rápidas"><button onClick={()=>go('servicio','plano')}><span>▦</span>Plano</button><button onClick={()=>go('servicio','barra')}><span>▰</span>Barra</button><button onClick={()=>go('tpv')}><span>€</span>TPV</button><button onClick={()=>go('cuadrantes')}><span>▦</span>Cuadrantes</button><button onClick={()=>go('inteligencia')}><span>✦</span>IA</button></nav>
  </div>}
 
 function Employees(){const[employees,setEmployees]=useState([]);const[name,setName]=useState('');const[pin,setPin]=useState('');useEffect(()=>{load()},[]);async function load(){if(!supabase)return;const{data}=await supabase.from('employees').select('*').order('name');setEmployees(data||[])}async function add(){if(!name||!pin)return alert('Nombre y PIN');const color=EMP_COLORS[employees.length%EMP_COLORS.length];const{error}=await supabase.from('employees').insert({name,pin,role:'empleado',color,can_clock:true,active:true});if(error)alert(error.message);setName('');setPin('');load()}async function update(e,patch){const{error}=await supabase.from('employees').update(patch).eq('id',e.id);if(error)alert(error.message);load()}return <div className="card"><h2>Empleados</h2><div className="row"><input placeholder="Nuevo empleado" value={name} onChange={e=>setName(e.target.value)}/><input placeholder="PIN" value={pin} onChange={e=>setPin(e.target.value)}/><button onClick={add}>Añadir</button></div>{employees.map(e=><div className="employee" key={e.id}><span className="sq" style={{background:e.color}}></span><b>{e.name}</b><span>{e.active?'Activo':'Inactivo'}</span><input placeholder="Nuevo PIN" onBlur={ev=>ev.target.value&&update(e,{pin:ev.target.value})}/><button onClick={()=>update(e,{active:!e.active})}>{e.active?'Desactivar':'Activar'}</button></div>)}</div>}
