@@ -37,7 +37,12 @@ export interface NumierArticle {
   article_name?: string | null
   family?: string | null
   category_name?: string | null
+  price?: number | null
   sale_price?: number | null
+  price_source?: 'catalog' | 'last_sale' | 'manual' | null
+  price_checked?: boolean
+  price_loading?: boolean
+  price_error?: boolean
 }
 
 export interface Recipe {

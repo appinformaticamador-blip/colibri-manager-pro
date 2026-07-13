@@ -185,7 +185,7 @@ export function calculateRecipe(
   const batchCost = ingredientCost + extraCost
   const yieldQuantity = Math.max(0.000001, Number(recipe.yield_quantity || 1))
   const costPerYield = batchCost / yieldQuantity
-  const salePrice = Math.max(0, Number(recipe.sale_price || numierSalePrice || 0))
+  const salePrice = Math.max(0, Number(numierSalePrice || recipe.sale_price || 0))
   const profitPerYield = salePrice - costPerYield
   const marginPct = salePrice > 0 ? profitPerYield / salePrice * 100 : 0
   const targetMargin = Math.min(95, Math.max(0, Number(recipe.target_margin_pct || 65)))

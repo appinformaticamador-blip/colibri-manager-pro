@@ -121,6 +121,10 @@ export default function ProfessionalRecipes({
       Number(numierPrices.get(String(editor.numier_article_code)) || 0),
     )
   }, [editor, masterItems, numierPrices, purchaseItems])
+  const editorNumierArticle = editor
+    ? numierCatalog.find((article) => String(article.article_code) === String(editor.numier_article_code))
+    : null
+  const editorNumierPrice = Number(editorNumierArticle?.sale_price || 0)
 
   const activeRows = recipeRows.filter(({ recipe }) => recipe.active !== false)
   const averageMargin = activeRows.length
@@ -274,7 +278,8 @@ export default function ProfessionalRecipes({
     <div className="professionalRecipeGrid">
       {filteredRows.map(({ recipe, ingredients, calculation }) => {
         const target = Number(recipe.target_margin_pct || 65)
-        const marginClass = calculation.marginPct >= target ? 'ok' : calculation.marginPct >= Math.max(0, target - 15) ? 'info' : 'bad'
+        const hasSalePrice = calculation.salePrice > 0
+        const marginClass = !hasSalePrice ? 'info' : calculation.marginPct >= target ? 'ok' : calculation.marginPct >= Math.max(0, target - 15) ? 'info' : 'bad'
         return <article className={`card professionalRecipeCard ${recipe.active === false ? 'archived' : ''}`} key={recipe.id}>
           <div className="recipeCardHeader">
             <div>
@@ -282,12 +287,12 @@ export default function ProfessionalRecipes({
               <h3>{recipe.name}</h3>
               <p>{ingredients.length} ingredientes · {amountFormatter.format(Number(recipe.yield_quantity || 1))} {recipe.yield_unit || 'ración'}</p>
             </div>
-            <strong className={marginClass}>{calculation.marginPct.toFixed(1)}%</strong>
+            <strong className={marginClass}>{hasSalePrice ? `${calculation.marginPct.toFixed(1)}%` : '—'}</strong>
           </div>
           <div className="recipeCostSummary">
             <p><span>Coste por {recipe.yield_unit || 'ración'}</span><b>{money(calculation.costPerYield)}</b></p>
-            <p><span>PVP NUMIER</span><b>{money(calculation.salePrice)}</b></p>
-            <p><span>Beneficio bruto</span><b>{money(calculation.profitPerYield)}</b></p>
+            <p><span>PVP aplicado</span><b>{hasSalePrice ? money(calculation.salePrice) : 'Precio no disponible en NUMIER'}</b></p>
+            <p><span>Beneficio bruto</span><b>{hasSalePrice ? money(calculation.profitPerYield) : 'Pendiente de PVP'}</b></p>
             <p><span>PVP objetivo</span><b>{money(calculation.recommendedSalePrice)}</b></p>
           </div>
           {calculation.warnings.length > 0 && <div className="recipeWarning">
@@ -333,7 +338,7 @@ export default function ProfessionalRecipes({
             }}>
               <option value="">Seleccionar artículo de venta…</option>
               {numierCatalog.map((article) => <option key={article.article_code} value={article.article_code}>
-                {article.article_name || article.article_code} · {money(article.sale_price)}
+                {article.article_name || article.article_code} · {Number(article.sale_price || 0) > 0 ? money(article.sale_price) : 'Precio no disponible en NUMIER'}
               </option>)}
             </select>
           </label>
@@ -345,9 +350,9 @@ export default function ProfessionalRecipes({
               <option>Plato</option><option>Tapa</option><option>Menú</option><option>Bebida elaborada</option><option>Producción</option><option>Otro</option>
             </select>
           </label>
-          <label>PVP
-            <input type="number" min="0" step="0.01" value={editor.sale_price || ''} onChange={(event) => setEditor({ ...editor, sale_price: Number(event.target.value) })} />
-          </label>
+          {editorNumierPrice > 0 ? <div className="numierPricePanel recipeNumierPrice"><span>PVP recuperado de NUMIER</span><b>{money(editorNumierPrice)}</b><small>{editorNumierArticle?.price_source === 'catalog' ? 'Catálogo NUMIER' : 'Última venta real'}</small></div> : <label>PVP manual opcional
+            <input type="number" min="0" step="0.01" placeholder="Solo si NUMIER no tiene precio" value={editor.sale_price || ''} onChange={(event) => setEditor({ ...editor, sale_price: Number(event.target.value) })} />
+          </label>}
           <label>Rendimiento
             <input type="number" min="0.001" step="0.001" value={editor.yield_quantity || ''} onChange={(event) => setEditor({ ...editor, yield_quantity: Number(event.target.value) })} />
           </label>
