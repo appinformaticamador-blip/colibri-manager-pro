@@ -9,7 +9,6 @@ export interface NumierCatalogRow {
   price_checked?: boolean
   price_loading?: boolean
   price_error?: boolean
-  sales_quantity?: number
   [key: string]: unknown
 }
 
@@ -59,11 +58,6 @@ export function buildNumierCatalog(
   recentLines: NumierTicketLine[],
 ): NumierCatalogRow[] {
   const historicalPrices = latestSalePrices(recentLines)
-  const salesQuantities = recentLines.reduce((totals, line) => {
-    const code = String(line.articulo || '').trim()
-    if (code) totals.set(code, (totals.get(code) || 0) + Math.abs(Number(line.cantidad || 0)))
-    return totals
-  }, new Map<string, number>())
   return articles.map((article) => {
     const code = String(article.article_code || '').trim()
     const catalogPrice = positiveNumber(article.price)
@@ -77,7 +71,6 @@ export function buildNumierCatalog(
       price_checked: Boolean(salePrice),
       price_loading: false,
       price_error: false,
-      sales_quantity: salesQuantities.get(code) || 0,
     }
   })
 }
