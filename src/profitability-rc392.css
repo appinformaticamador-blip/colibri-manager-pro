@@ -1,0 +1,33 @@
+.recipeCopyTools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.recipeCopyTools select {
+  min-width: 190px;
+  margin: 0;
+}
+
+.professionalRecipeCard.incomplete {
+  border-left-color: #d1a62f !important;
+}
+
+.professionalRecipeCard {
+  cursor: pointer;
+}
+
+@media (max-width: 620px) {
+  .recipeCopyTools {
+    display: grid;
+    grid-template-columns: 1fr;
+    width: 100%;
+  }
+
+  .recipeCopyTools select,
+  .recipeCopyTools button {
+    width: 100%;
+    min-width: 0;
+  }
+}
