@@ -1,0 +1,16 @@
+COLIBRI TPV + SYNC GUARDIAN RC 3.9.4
+
+1. Copia esta carpeta completa al equipo del bar.
+2. Haz doble clic en INSTALAR_COLIBRI_TPV.bat.
+3. Acepta el permiso de administrador.
+4. Usa desde entonces el acceso COLIBRI TPV del escritorio.
+
+No hay que crear config.json ni escribir claves.
+El instalador detecta C:\NUMIER\NUMIER.EXE, instala el Sync y deja el Guardian en el inicio de Windows.
+
+MODO MANTENIMIENTO:
+Crea el archivo C:\ProgramData\ColibriERP\maintenance.pause para impedir reinicios automáticos.
+Bórralo para reactivar la vigilancia.
+
+LOG:
+C:\ProgramData\ColibriERP\Logs\guardian.log

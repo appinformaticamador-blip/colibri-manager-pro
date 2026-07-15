@@ -2,16 +2,8 @@
   "numier_exe": "C:\\NUMIER\\NUMIER.EXE",
   "sync_exe": "C:\\ColibriERP\\ColibriSync.exe",
   "sync_working_directory": "C:\\ColibriERP",
-  "watch_interval_seconds": 12,
-  "heartbeat_seconds": 30,
-  "keep_numier_running": true,
-  "keep_sync_running": true,
+  "watch_interval_seconds": 15,
+  "restart_sync_while_numier_is_open": true,
   "start_sync_hidden": true,
-  "start_with_windows": true,
-  "maintenance_flag": "C:\\ColibriERP\\maintenance.pause",
-  "log_file": "C:\\ProgramData\\ColibriERP\\Logs\\guardian.log",
-  "supabase_url": "https://TU-PROYECTO.supabase.co",
-  "supabase_anon_key": "PEGA_AQUI_LA_ANON_KEY",
-  "business_name": "Brasería El Colibrí",
-  "equipment_name": "TPV Barra"
+  "log_file": "C:\\ColibriERP\\logs\\ColibriLauncher.log"
 }

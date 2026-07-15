@@ -12,7 +12,7 @@ await app.RunAsync(args);
 
 public sealed class ColibriSyncApp
 {
-    private readonly SyncConfig _config = SyncConfig.Load();
+    private readonly SyncConfig _config = SyncConfig.Default();
     private readonly JsonSerializerOptions _json = new(JsonSerializerDefaults.Web)
     {
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
@@ -21,8 +21,11 @@ public sealed class ColibriSyncApp
     public async Task RunAsync(string[] args)
     {
         bool debug = args.Any(a => a.Equals("--debug", StringComparison.OrdinalIgnoreCase));
-        bool interactive = args.Any(a => a.Equals("--interactive", StringComparison.OrdinalIgnoreCase));
         Console.OutputEncoding = Encoding.UTF8;
+
+        using var mutex = new Mutex(initiallyOwned: true, @"Global\ColibriERP_Sync_SingleInstance", out var firstInstance);
+        if (!firstInstance) return;
+
         Header();
 
         if (debug)
@@ -31,78 +34,19 @@ public sealed class ColibriSyncApp
             return;
         }
 
-        using var cts = new CancellationTokenSource();
-        Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
-
-        Log("Colibrí Sync iniciado en modo continuo.");
-        await SendRuntimeHeartbeat("STARTING", null);
-
-        if (interactive && !Console.IsInputRedirected)
-        {
-            Console.WriteLine("Modo interactivo: S sincroniza ahora · Q sale.");
-            _ = Task.Run(async () =>
-            {
-                while (!cts.IsCancellationRequested)
-                {
-                    try
-                    {
-                        var key = Console.ReadKey(intercept: true).Key;
-                        if (key == ConsoleKey.Q) { cts.Cancel(); break; }
-                        if (key == ConsoleKey.S) await SyncOnce(debug: false);
-                    }
-                    catch { break; }
-                }
-            });
-        }
-
-        while (!cts.IsCancellationRequested)
+        Log("Sync continuo iniciado. No requiere intervención del usuario.");
+        while (true)
         {
             try
             {
                 await SyncOnce(debug: false);
-                await SendRuntimeHeartbeat("ONLINE", null);
             }
             catch (Exception ex)
             {
-                Log("ERROR auto-sync: " + ex);
-                await SendRuntimeHeartbeat("ERROR", ex.Message);
+                Log("ERROR auto-sync: " + ex.Message);
             }
 
-            try
-            {
-                await Task.Delay(TimeSpan.FromSeconds(Math.Clamp(_config.AutoSyncSeconds, 10, 3600)), cts.Token);
-            }
-            catch (OperationCanceledException) { }
-        }
-
-        await SendRuntimeHeartbeat("STOPPED", "Cierre controlado");
-        Log("Colibrí Sync detenido.");
-    }
-
-    private async Task SendRuntimeHeartbeat(string state, string? error)
-    {
-        try
-        {
-            using var api = SupabaseRest.Create(_config);
-            await api.UpsertRuntimeStatusAsync(new RuntimeStatusDto
-            {
-                StatusKey = "sync",
-                Component = "sync",
-                BusinessName = _config.BusinessName,
-                MachineName = Environment.MachineName,
-                Version = typeof(ColibriSyncApp).Assembly.GetName().Version?.ToString() ?? "3.9.0",
-                State = state,
-                ProcessRunning = true,
-                NumierRunning = Process.GetProcessesByName("NUMIER").Length > 0,
-                InternetOk = true,
-                LastError = error,
-                StartedAt = Process.GetCurrentProcess().StartTime.ToUniversalTime().ToString("O"),
-                HeartbeatAt = DateTime.UtcNow.ToString("O")
-            });
-        }
-        catch (Exception ex)
-        {
-            Log("No se pudo enviar heartbeat: " + ex.Message);
+            await Task.Delay(TimeSpan.FromSeconds(Math.Clamp(_config.AutoSyncSeconds, 15, 3600)));
         }
     }
 
@@ -529,26 +473,6 @@ public sealed record SyncConfig
     public int AutoSyncSeconds { get; init; } = 60;
     public int MaxTicketsPerSync { get; init; } = 500;
     public string BusinessName { get; init; } = "Brasería El Colibrí";
-
-    public static SyncConfig Load()
-    {
-        var baseDir = AppContext.BaseDirectory;
-        var path = Path.Combine(baseDir, "config.json");
-        var example = Path.Combine(baseDir, "config.example.json");
-        try
-        {
-            if (!File.Exists(path) && File.Exists(example)) File.Copy(example, path, false);
-            if (!File.Exists(path)) return new SyncConfig();
-            return JsonSerializer.Deserialize<SyncConfig>(File.ReadAllText(path),
-                new JsonSerializerOptions { PropertyNameCaseInsensitive = true, PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower })
-                ?? new SyncConfig();
-        }
-        catch
-        {
-            return new SyncConfig();
-        }
-    }
-
     public static SyncConfig Default() => new();
 }
 
@@ -598,12 +522,6 @@ public sealed class SupabaseRest : IDisposable
         status.StatusKey = "numier";
         status.UpdatedAt = DateTime.UtcNow.ToString("O");
         await Upsert("numier_sync_status", "status_key", new[] { status });
-    }
-
-    public async Task UpsertRuntimeStatusAsync(RuntimeStatusDto status)
-    {
-        status.HeartbeatAt ??= DateTime.UtcNow.ToString("O");
-        await Upsert("colibri_runtime_status", "status_key", new[] { status });
     }
 
     private async Task Upsert<T>(string table, string conflict, IEnumerable<T> rows)
@@ -707,23 +625,6 @@ public sealed class SyncStatusDto
     [JsonPropertyName("last_batch_lines")] public int LastBatchLines { get; set; }
     [JsonPropertyName("message")] public string? Message { get; set; }
     [JsonPropertyName("updated_at")] public string? UpdatedAt { get; set; }
-}
-
-public sealed class RuntimeStatusDto
-{
-    [JsonPropertyName("status_key")] public string StatusKey { get; set; } = "sync";
-    [JsonPropertyName("component")] public string Component { get; set; } = "sync";
-    [JsonPropertyName("business_name")] public string BusinessName { get; set; } = "";
-    [JsonPropertyName("machine_name")] public string MachineName { get; set; } = "";
-    [JsonPropertyName("version")] public string Version { get; set; } = "";
-    [JsonPropertyName("state")] public string State { get; set; } = "UNKNOWN";
-    [JsonPropertyName("process_running")] public bool ProcessRunning { get; set; }
-    [JsonPropertyName("numier_running")] public bool NumierRunning { get; set; }
-    [JsonPropertyName("internet_ok")] public bool InternetOk { get; set; }
-    [JsonPropertyName("pending_items")] public int PendingItems { get; set; }
-    [JsonPropertyName("last_error")] public string? LastError { get; set; }
-    [JsonPropertyName("started_at")] public string? StartedAt { get; set; }
-    [JsonPropertyName("heartbeat_at")] public string? HeartbeatAt { get; set; }
 }
 
 public sealed class DbfTable

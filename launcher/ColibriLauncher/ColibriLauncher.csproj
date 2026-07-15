@@ -2,13 +2,14 @@
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AssemblyName>ColibriLauncher</AssemblyName>
     <RootNamespace>ColibriLauncher</RootNamespace>
-    <Version>3.9.3</Version>
-    <FileVersion>3.9.3.0</FileVersion>
-    <AssemblyVersion>3.9.3.0</AssemblyVersion>
+    <Version>3.9.4</Version>
+    <FileVersion>3.9.4.0</FileVersion>
+    <AssemblyVersion>3.9.4.0</AssemblyVersion>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <PublishSingleFile>true</PublishSingleFile>
     <SelfContained>true</SelfContained>

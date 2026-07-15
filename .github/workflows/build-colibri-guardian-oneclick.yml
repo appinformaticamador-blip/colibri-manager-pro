@@ -1,0 +1,35 @@
+name: Build Colibri Guardian One Click
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'sync/**'
+      - 'launcher/**'
+      - 'deploy/windows/**'
+      - '.github/workflows/build-colibri-guardian-oneclick.yml'
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Publish Sync
+        run: dotnet publish sync/ColibriSync/ColibriSync.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o out/sync
+      - name: Publish Guardian
+        run: dotnet publish launcher/ColibriLauncher/ColibriLauncher.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o out/guardian
+      - name: Prepare one-click package
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force -Path out/package | Out-Null
+          Copy-Item out/sync/ColibriEngine.exe out/package/ColibriEngine.exe
+          Copy-Item out/guardian/ColibriLauncher.exe out/package/ColibriGuardian.exe
+          Copy-Item deploy/windows/INSTALAR_COLIBRI_TPV.ps1 out/package/
+          Copy-Item deploy/windows/INSTALAR_COLIBRI_TPV.bat out/package/
+          Copy-Item deploy/windows/LEEME_INSTALACION.txt out/package/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: COLIBRI-TPV-SYNC-GUARDIAN-RC-3.9.4
+          path: out/package/**
+          retention-days: 30
