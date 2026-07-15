@@ -1,0 +1,37 @@
+name: Build Colibri Sync Guardian Windows
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'sync/**'
+      - 'launcher/**'
+      - 'scripts/Instalar-ColibriGuardian.ps1'
+      - '.github/workflows/build-colibri-sync-guardian.yml'
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Publish Sync
+        run: dotnet publish sync/ColibriSync/ColibriSync.csproj -c Release -r win-x64 --self-contained true /p:PublishSingleFile=true /p:IncludeNativeLibrariesForSelfExtract=true -o out
+      - name: Rename Sync
+        shell: pwsh
+        run: |
+          if (Test-Path out/ColibriEngine.exe) { Move-Item out/ColibriEngine.exe out/ColibriSync.exe -Force }
+      - name: Publish Guardian
+        run: dotnet publish launcher/ColibriLauncher/ColibriLauncher.csproj -c Release -r win-x64 --self-contained true /p:PublishSingleFile=true /p:IncludeNativeLibrariesForSelfExtract=true -o guardian
+      - name: Assemble installer package
+        shell: pwsh
+        run: |
+          Copy-Item guardian/ColibriLauncher.exe out/ColibriLauncher.exe -Force
+          Copy-Item launcher/ColibriLauncher/launcher.example.json out/launcher.example.json -Force
+          Copy-Item sync/ColibriSync/config.example.json out/config.example.json -Force
+          Copy-Item scripts/Instalar-ColibriGuardian.ps1 out/Instalar-ColibriGuardian.ps1 -Force
+          Copy-Item README_RC_3_9_3_SYNC_GUARDIAN.md out/LEEME_SYNC_GUARDIAN.md -Force
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Colibri-Sync-Guardian-Windows-RC-3.9.3
+          path: out/**

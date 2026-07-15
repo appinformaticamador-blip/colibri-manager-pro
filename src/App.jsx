@@ -815,7 +815,61 @@ function Profitability(){
  </div>
 }
 
-function Settings(){const[settings,setSettings]=useState(null);useEffect(()=>{supabase?.from('settings').select('*').single().then(({data})=>setSettings(data))},[]);async function save(){const{error}=await supabase.from('settings').upsert(settings);if(error)alert(error.message);else alert('Guardado')}if(!settings)return <div className="card">Cargando...</div>;return <div className="card"><h2>Configuración</h2><label>Latitud<input value={settings.bar_lat} onChange={e=>setSettings({...settings,bar_lat:e.target.value})}/></label><label>Longitud<input value={settings.bar_lng} onChange={e=>setSettings({...settings,bar_lng:e.target.value})}/></label><label>Radio metros<input value={settings.gps_radius_m} onChange={e=>setSettings({...settings,gps_radius_m:e.target.value})}/></label><button onClick={save}>Guardar</button><div className="qrprint"><h3>QR físico del bar</h3><p>Imprime este código y colócalo en zona de personal.</p><img src="/qr_bar_colibri.png"/></div></div>}
+function Settings(){
+ const[settings,setSettings]=useState(null);
+ const[runtime,setRuntime]=useState([]);
+ const[runtimeError,setRuntimeError]=useState('');
+ useEffect(()=>{
+  supabase?.from('settings').select('*').single().then(({data})=>setSettings(data));
+  loadRuntime();
+  const t=setInterval(loadRuntime,15000);
+  return()=>clearInterval(t);
+ },[]);
+ async function loadRuntime(){
+  if(!supabase)return;
+  const{data,error}=await supabase.from('colibri_runtime_status').select('*').order('heartbeat_at',{ascending:false});
+  if(error){setRuntimeError(error.message);return}
+  setRuntime(data||[]);setRuntimeError('');
+ }
+ async function save(){const{error}=await supabase.from('settings').upsert(settings);if(error)alert(error.message);else alert('Guardado')}
+ const guardian=runtime.find(x=>x.status_key==='guardian');
+ const sync=runtime.find(x=>x.status_key==='sync');
+ const age=(date)=>date?Math.max(0,Math.floor((Date.now()-new Date(date).getTime())/1000)):99999;
+ const guardianOnline=guardian&&age(guardian.heartbeat_at)<120;
+ const syncOnline=sync&&age(sync.heartbeat_at)<150;
+ const statusClass=v=>v?'runtimeOk':'runtimeBad';
+ if(!settings)return <div className="card">Cargando...</div>;
+ return <div className="settingsPage">
+  <div className="card">
+   <h2>Configuración</h2>
+   <label>Latitud<input value={settings.bar_lat} onChange={e=>setSettings({...settings,bar_lat:e.target.value})}/></label>
+   <label>Longitud<input value={settings.bar_lng} onChange={e=>setSettings({...settings,bar_lng:e.target.value})}/></label>
+   <label>Radio metros<input value={settings.gps_radius_m} onChange={e=>setSettings({...settings,gps_radius_m:e.target.value})}/></label>
+   <button onClick={save}>Guardar</button>
+  </div>
+  <div className="card runtimePanel">
+   <div className="row between">
+    <div><h2>Colibrí Sync Guardian</h2><p>Estado del TPV y la sincronización en este restaurante.</p></div>
+    <button onClick={loadRuntime}>Actualizar estado</button>
+   </div>
+   {runtimeError&&<div className="runtimeWarn">Ejecuta el SQL RC 3.9.3 para activar el diagnóstico: {runtimeError}</div>}
+   <div className="runtimeGrid">
+    <div className={statusClass(guardianOnline)}><span>Guardian</span><b>{guardianOnline?'ACTIVO':'SIN CONTACTO'}</b><small>{guardian?.heartbeat_at?secondsAgo(guardian.heartbeat_at):'Sin datos'}</small></div>
+    <div className={statusClass(Boolean(guardian?.numier_running))}><span>NUMIER</span><b>{guardian?.numier_running?'EJECUTÁNDOSE':'DETENIDO'}</b><small>{guardian?.equipment_name||guardian?.machine_name||'-'}</small></div>
+    <div className={statusClass(Boolean(guardian?.sync_running||syncOnline))}><span>Colibrí Sync</span><b>{guardian?.sync_running||syncOnline?'ACTIVO':'DETENIDO'}</b><small>{sync?.version||guardian?.version||'-'}</small></div>
+    <div className={statusClass(syncOnline)}><span>Último heartbeat</span><b>{syncOnline?'ONLINE':'ATRASADO'}</b><small>{sync?.heartbeat_at?secondsAgo(sync.heartbeat_at):'Sin datos'}</small></div>
+   </div>
+   <div className="runtimeDetails">
+    <p><b>Equipo:</b> {guardian?.equipment_name||guardian?.machine_name||sync?.machine_name||'Sin identificar'}</p>
+    <p><b>Estado:</b> {guardian?.state||sync?.state||'Sin datos'}</p>
+    <p><b>Último reinicio Sync:</b> {guardian?.last_sync_restart_at?new Date(guardian.last_sync_restart_at).toLocaleString('es-ES'):'-'}</p>
+    <p><b>Último reinicio NUMIER:</b> {guardian?.last_numier_restart_at?new Date(guardian.last_numier_restart_at).toLocaleString('es-ES'):'-'}</p>
+    {(guardian?.last_error||sync?.last_error)&&<p className="runtimeError"><b>Último error:</b> {guardian?.last_error||sync?.last_error}</p>}
+   </div>
+  </div>
+  <div className="card qrprint"><h3>QR físico del bar</h3><p>Imprime este código y colócalo en zona de personal.</p><img src="/qr_bar_colibri.png"/></div>
+ </div>
+}
 
 
 class ModuleErrorBoundary extends React.Component{
