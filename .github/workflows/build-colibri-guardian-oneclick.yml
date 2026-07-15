@@ -1,4 +1,4 @@
-name: Build Colibri Guardian One Click
+name: Build Colibri Guardian One Click RC 3.9.5
 on:
   workflow_dispatch:
   push:
@@ -30,6 +30,6 @@ jobs:
           Copy-Item deploy/windows/LEEME_INSTALACION.txt out/package/
       - uses: actions/upload-artifact@v4
         with:
-          name: COLIBRI-TPV-SYNC-GUARDIAN-RC-3.9.4
+          name: COLIBRI-TPV-SYNC-GUARDIAN-RC-3.9.5
           path: out/package/**
           retention-days: 30
