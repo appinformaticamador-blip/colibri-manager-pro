@@ -1,15 +1,10 @@
-import React from 'react';
-import { createRoot } from 'react-dom/client';
-import App from './App.jsx';
+const isPeoplePortal = window.location.hostname.startsWith('fichar.') || window.location.pathname === '/fichar' || window.location.pathname.startsWith('/fichar/');
 
-const rootElement = document.getElementById('root');
-
-if (!rootElement) {
-  throw new Error('No se encontró el elemento #root');
+if (isPeoplePortal) {
+  document.title = 'Colibrí People · Mi Jornada';
+  import('./people-entry.jsx');
+} else {
+  document.title = 'Colibrí ERP · Gerencia';
+  // Carga exactamente el ERP estable existente. El portal del empleado vive en otro módulo.
+  import('./App.jsx');
 }
-
-createRoot(rootElement).render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>,
-);
