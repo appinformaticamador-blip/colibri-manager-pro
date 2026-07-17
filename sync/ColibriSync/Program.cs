@@ -814,3 +814,5 @@ public sealed class DbfRecord
         catch { return null; }
     }
 }
+
+}
