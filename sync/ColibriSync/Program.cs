@@ -52,7 +52,7 @@ public sealed class ColibriSyncApp
 
     private void Header()
     {
-        Console.WriteLine("🐦 Colibrí Engine 3.1.0 RC2 - NUMIER LIVE + Estado del Servicio");
+        Console.WriteLine("🐦 Colibrí Engine 4.0 - Integridad automática + NUMIER LIVE");
         Console.WriteLine("------------------------------------------------");
         Console.WriteLine($"Empresa: {_config.BusinessName}");
         Console.WriteLine($"Ruta NUMIER: {_config.NumierPath}");
@@ -82,6 +82,11 @@ public sealed class ColibriSyncApp
         var sw = Stopwatch.StartNew();
         using var api = SupabaseRest.Create(_config);
         var lastCabId = await api.GetLastCabIdAsync();
+        var auditState = DailyAuditState.Load();
+        bool fullAudit = debug || auditState.LastSuccessfulAuditDate != DateTime.Today.ToString("yyyy-MM-dd");
+        Log(fullAudit
+            ? "AUDITORÍA DIARIA PENDIENTE: se comprobarán todos los tickets cobrados."
+            : "Auditoría diaria ya completada. Reconciliación rápida: hoy y ayer.");
         Log($"Último CAB_ID en Supabase: {lastCabId}");
 
         using var snapshot = SafeDbfSnapshot.Create(cabPath, detPath, hasArticulos ? artPath : null, Log);
@@ -200,48 +205,63 @@ public sealed class ColibriSyncApp
         await api.MarkOpenAccountsSnapshotAsync();
         Log($"Estado del servicio: {openAccounts.Count:N0} cuentas abiertas. Pendiente: {openAccounts.Sum(o=>o.Total):N2} €");
 
-        var newTickets = new List<TicketDto>();
-        long maxCabSeen = lastCabId;
-        int scanned = 0, totalCobrados = 0, importedCobrados = 0;
+        // Integridad de ventas: no se confía únicamente en el CAB_ID máximo.
+        // En el primer arranque del día se comparan TODOS los cobrados; durante el día,
+        // se reconcilian hoy/ayer y cualquier CAB_ID posterior al máximo remoto.
+        var allPaidTickets = new List<TicketDto>();
+        long maxCabSeen = 0;
+        int scanned = 0;
         foreach (var rec in cabDbf.Records())
         {
             scanned++;
             long cabId = rec.GetLong("CAB_ID");
             maxCabSeen = Math.Max(maxCabSeen, cabId);
-            string estado = rec.GetString("CAB_ESTADO");
+            string estado = FirstNonEmpty(rec.GetString("CAB_ESTADO"), rec.GetString("CAB_EST"));
             if (!estado.Equals("C", StringComparison.OrdinalIgnoreCase)) continue;
-            totalCobrados++;
-            if (cabId <= lastCabId) { importedCobrados++; continue; }
 
-            if (newTickets.Count < _config.MaxTicketsPerSync)
+            var fecha = rec.GetDate("CAB_FECHA") ?? DateTime.Today;
+            var hora = rec.GetVfpDateTime("CAB_HORA") ?? fecha;
+            allPaidTickets.Add(new TicketDto
             {
-                var fecha = rec.GetDate("CAB_FECHA") ?? DateTime.Today;
-                var hora = rec.GetVfpDateTime("CAB_HORA") ?? fecha;
-                string numdoc = rec.GetString("CAB_NUMDOC");
-                string forma = rec.GetString("CAB_COBRO");
-                decimal tarjeta = rec.GetDecimal("CAB_ENT_TA");
-                decimal cheque = rec.GetDecimal("CAB_ENT_CH");
-
-                newTickets.Add(new TicketDto
-                {
-                    CabId = cabId,
-                    Fecha = fecha.ToString("yyyy-MM-dd"),
-                    Hora = hora.ToUniversalTime().ToString("O"),
-                    Estado = estado,
-                    FormaPago = forma,
-                    Numdoc = numdoc,
-                    Tarjeta = tarjeta,
-                    Cheque = cheque
-                });
-            }
+                CabId = cabId,
+                Fecha = fecha.ToString("yyyy-MM-dd"),
+                Hora = hora.ToUniversalTime().ToString("O"),
+                Estado = estado,
+                FormaPago = FirstNonEmpty(rec.GetString("CAB_COBRO"), rec.GetString("FORMA_PAGO")),
+                Numdoc = FirstNonEmpty(rec.GetString("CAB_NUMDOC"), rec.GetString("NUMDOC")),
+                Tarjeta = rec.GetDecimal("CAB_ENT_TA"),
+                Cheque = rec.GetDecimal("CAB_ENT_CH")
+            });
         }
 
-        var processedBeforeBatch = importedCobrados;
-        var processedAfterBatchEstimate = Math.Min(totalCobrados, importedCobrados + newTickets.Count);
-        var pctBefore = totalCobrados == 0 ? 100m : Math.Round((decimal)processedBeforeBatch * 100m / totalCobrados, 2);
-        Log($"Cabeceras escaneadas: {scanned:N0}. Cobrados totales: {totalCobrados:N0}. Importados: {processedBeforeBatch:N0} ({pctBefore:N2}%). Nuevos detectados: {newTickets.Count:N0}. Último CAB_ID visto: {maxCabSeen}");
-        if (newTickets.Count == 0)
+        var recentFrom = DateTime.Today.AddDays(-1);
+        var candidates = fullAudit
+            ? allPaidTickets
+            : allPaidTickets.Where(t =>
+                (DateTime.TryParseExact(t.Fecha, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var d) && d >= recentFrom)
+                || t.CabId > lastCabId).ToList();
+
+        var candidateIds = candidates.Select(t => t.CabId).Distinct().ToList();
+        var existingIds = await api.GetExistingCabIdsAsync(candidateIds);
+        var missingTickets = candidates
+            .Where(t => !existingIds.Contains(t.CabId))
+            .OrderBy(t => t.CabId)
+            .Take(_config.MaxTicketsPerSync)
+            .ToList();
+        int totalMissingDetected = candidates.Count(t => !existingIds.Contains(t.CabId));
+
+        Log($"Cabeceras escaneadas: {scanned:N0}. Cobrados: {allPaidTickets.Count:N0}. " +
+            $"Candidatos revisados: {candidates.Count:N0}. Faltantes detectados: {totalMissingDetected:N0}.");
+
+        if (missingTickets.Count == 0)
         {
+            if (fullAudit)
+            {
+                auditState.MarkSuccess(allPaidTickets.Count, 0);
+                auditState.Save();
+                Log("AUDITORÍA DIARIA COMPLETADA: no falta ningún ticket.");
+            }
+
             await api.UpsertSyncFileAsync(_config.CabeceraFile, cabInfo.Length, cabInfo.LastWriteTimeUtc);
             await api.UpsertSyncFileAsync(_config.DetalleFile, detInfo.Length, detInfo.LastWriteTimeUtc);
             await api.UpsertSyncStatusAsync(new SyncStatusDto
@@ -249,20 +269,20 @@ public sealed class ColibriSyncApp
                 BusinessName = _config.BusinessName,
                 Mode = "LIVE",
                 ProgressPercent = 100,
-                ProcessedTickets = totalCobrados,
-                TotalTickets = totalCobrados,
+                ProcessedTickets = allPaidTickets.Count,
+                TotalTickets = allPaidTickets.Count,
                 PendingTickets = 0,
                 LastCabId = lastCabId,
                 MaxCabId = maxCabSeen,
                 LastBatchTickets = 0,
                 LastBatchLines = 0,
-                Message = "ACTUALIZADO 100% · ERP en tiempo real"
+                Message = fullAudit ? "AUDITORÍA DIARIA OK · ERP íntegro" : "ACTUALIZADO 100% · ERP en tiempo real"
             });
-            Log("ACTUALIZADO 100%. Sin tickets nuevos. Modo LIVE.");
+            Log("ACTUALIZADO 100%. Sin tickets pendientes.");
             return;
         }
 
-        var ids = newTickets.Select(t => t.CabId).ToHashSet();
+        var ids = missingTickets.Select(t => t.CabId).ToHashSet();
         var lines = new List<TicketLineDto>();
         var totals = new Dictionary<long, decimal>();
         int detailScanned = 0;
@@ -276,7 +296,6 @@ public sealed class ColibriSyncApp
             totals[cabId] = totals.GetValueOrDefault(cabId) + importe;
             var lineId = r.GetLong("ID");
             if (lineId <= 0) lineId = detailScanned;
-
             lines.Add(new TicketLineDto
             {
                 CabId = cabId,
@@ -290,45 +309,48 @@ public sealed class ColibriSyncApp
             });
         }
 
-        foreach (var t in newTickets)
+        foreach (var t in missingTickets)
         {
             t.Total = totals.GetValueOrDefault(t.CabId);
-            if (t.Tarjeta > 0 || t.Cheque > 0)
-            {
-                t.Efectivo = Math.Max(0, t.Total - t.Tarjeta - t.Cheque);
-            }
-            else
-            {
-                t.Efectivo = t.Total;
-            }
+            t.Efectivo = (t.Tarjeta > 0 || t.Cheque > 0)
+                ? Math.Max(0, t.Total - t.Tarjeta - t.Cheque)
+                : t.Total;
         }
 
-        Log($"Líneas nuevas detectadas: {lines.Count:N0}");
-        await api.UpsertTicketsAsync(newTickets);
+        Log($"Recuperando {missingTickets.Count:N0} tickets y {lines.Count:N0} líneas...");
+        // Primero cabeceras y después líneas. Si cualquier envío falla, la auditoría NO se marca como completada.
+        await api.UpsertTicketsAsync(missingTickets);
         await api.UpsertLinesAsync(lines);
         await api.UpsertSyncFileAsync(_config.CabeceraFile, cabInfo.Length, cabInfo.LastWriteTimeUtc);
         await api.UpsertSyncFileAsync(_config.DetalleFile, detInfo.Length, detInfo.LastWriteTimeUtc);
+
+        int pending = Math.Max(0, totalMissingDetected - missingTickets.Count);
+        if (fullAudit && pending == 0)
+        {
+            auditState.MarkSuccess(allPaidTickets.Count, missingTickets.Count);
+            auditState.Save();
+            Log($"AUDITORÍA DIARIA COMPLETADA: {missingTickets.Count:N0} tickets recuperados.");
+        }
+
         sw.Stop();
-        var processedAfter = Math.Min(totalCobrados, importedCobrados + newTickets.Count);
-        var pending = Math.Max(0, totalCobrados - processedAfter);
-        var pct = totalCobrados == 0 ? 100m : Math.Round((decimal)processedAfter * 100m / totalCobrados, 2);
-        var mode = pending == 0 ? "LIVE" : "SINCRONIZANDO";
+        decimal pct = allPaidTickets.Count == 0 ? 100 : Math.Round((decimal)(allPaidTickets.Count - pending) * 100m / allPaidTickets.Count, 2);
         await api.UpsertSyncStatusAsync(new SyncStatusDto
         {
             BusinessName = _config.BusinessName,
-            Mode = mode,
+            Mode = pending == 0 ? "LIVE" : "RECUPERANDO",
             ProgressPercent = pct,
-            ProcessedTickets = processedAfter,
-            TotalTickets = totalCobrados,
+            ProcessedTickets = allPaidTickets.Count - pending,
+            TotalTickets = allPaidTickets.Count,
             PendingTickets = pending,
-            LastCabId = newTickets.Max(t => t.CabId),
+            LastCabId = Math.Max(lastCabId, missingTickets.Max(t => t.CabId)),
             MaxCabId = maxCabSeen,
-            LastBatchTickets = newTickets.Count,
+            LastBatchTickets = missingTickets.Count,
             LastBatchLines = lines.Count,
-            Message = pending == 0 ? "ACTUALIZADO 100% · ERP en tiempo real" : $"SINCRONIZANDO {pct:N1}% · quedan {pending:N0} tickets"
+            Message = pending == 0
+                ? $"INTEGRIDAD OK · {missingTickets.Count:N0} recuperados"
+                : $"RECUPERANDO · quedan {pending:N0} tickets"
         });
-        Log($"Sincronizados {newTickets.Count:N0} tickets y {lines.Count:N0} líneas. Progreso: {pct:N2}% ({processedAfter:N0}/{totalCobrados:N0}). Pendientes: {pending:N0}. Tiempo: {sw.Elapsed.TotalSeconds:N1}s");
-    }
+        Log($"Sincronizados/recuperados {missingTickets.Count:N0} tickets y {lines.Count:N0} líneas. Pendientes: {pending:N0}. Tiempo: {sw.Elapsed.TotalSeconds:N1}s");
 
 
     private static Dictionary<string, ArticleDto> BuildArticles(DbfTable artDbf, Action<string> log)
@@ -476,6 +498,50 @@ public sealed record SyncConfig
     public static SyncConfig Default() => new();
 }
 
+public sealed class DailyAuditState
+{
+    [JsonPropertyName("last_successful_audit_date")] public string? LastSuccessfulAuditDate { get; set; }
+    [JsonPropertyName("completed_at")] public string? CompletedAt { get; set; }
+    [JsonPropertyName("tickets_checked")] public int TicketsChecked { get; set; }
+    [JsonPropertyName("tickets_recovered")] public int TicketsRecovered { get; set; }
+
+    private static string StatePath
+    {
+        get
+        {
+            var common = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
+            return Path.Combine(common, "ColibriERP", "audit-state.json");
+        }
+    }
+
+    public static DailyAuditState Load()
+    {
+        try
+        {
+            if (!File.Exists(StatePath)) return new DailyAuditState();
+            return JsonSerializer.Deserialize<DailyAuditState>(File.ReadAllText(StatePath)) ?? new DailyAuditState();
+        }
+        catch { return new DailyAuditState(); }
+    }
+
+    public void MarkSuccess(int checkedTickets, int recoveredTickets)
+    {
+        LastSuccessfulAuditDate = DateTime.Today.ToString("yyyy-MM-dd");
+        CompletedAt = DateTime.Now.ToString("O");
+        TicketsChecked = checkedTickets;
+        TicketsRecovered = recoveredTickets;
+    }
+
+    public void Save()
+    {
+        var dir = Path.GetDirectoryName(StatePath)!;
+        Directory.CreateDirectory(dir);
+        var temp = StatePath + ".tmp";
+        File.WriteAllText(temp, JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true }));
+        File.Move(temp, StatePath, true);
+    }
+}
+
 public sealed class SupabaseRest : IDisposable
 {
     private readonly HttpClient _http;
@@ -500,6 +566,25 @@ public sealed class SupabaseRest : IDisposable
         using var doc = JsonDocument.Parse(txt);
         if (doc.RootElement.GetArrayLength() == 0) return 0;
         return doc.RootElement[0].GetProperty("cab_id").GetInt64();
+    }
+
+    public async Task<HashSet<long>> GetExistingCabIdsAsync(IEnumerable<long> ids)
+    {
+        var result = new HashSet<long>();
+        var distinct = ids.Where(id => id > 0).Distinct().ToList();
+        const int chunkSize = 150;
+        for (int i = 0; i < distinct.Count; i += chunkSize)
+        {
+            var chunk = distinct.Skip(i).Take(chunkSize);
+            string values = string.Join(",", chunk);
+            var resp = await _http.GetAsync($"numier_tickets?select=cab_id&cab_id=in.({values})");
+            var txt = await resp.Content.ReadAsStringAsync();
+            if (!resp.IsSuccessStatusCode) throw new Exception("Supabase comprobar CAB_ID: " + txt);
+            using var doc = JsonDocument.Parse(txt);
+            foreach (var row in doc.RootElement.EnumerateArray())
+                if (row.TryGetProperty("cab_id", out var idEl) && idEl.TryGetInt64(out var id)) result.Add(id);
+        }
+        return result;
     }
 
     public async Task UpsertTicketsAsync(IEnumerable<TicketDto> rows) => await Upsert("numier_tickets", "cab_id", rows);

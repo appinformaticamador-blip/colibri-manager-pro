@@ -1,0 +1,26 @@
+name: Build Colibri Engine Windows
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "sync/ColibriSync/**"
+      - ".github/workflows/build-colibri-engine-windows.yml"
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+      - name: Restaurar
+        run: dotnet restore sync/ColibriSync/ColibriSync.csproj
+      - name: Compilar y publicar EXE autónomo
+        run: dotnet publish sync/ColibriSync/ColibriSync.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o salida/ColibriEngine
+      - name: Subir artefacto
+        uses: actions/upload-artifact@v4
+        with:
+          name: COLIBRI_ENGINE_4_0_WINDOWS
+          path: salida/ColibriEngine/**
