@@ -3,24 +3,39 @@ name: Build Colibri Engine Windows
 on:
   workflow_dispatch:
   push:
+    branches: [develop, main]
     paths:
-      - "sync/ColibriSync/**"
-      - ".github/workflows/build-colibri-engine-windows.yml"
+      - 'sync/ColibriSync/**'
+      - '.github/workflows/build-colibri-engine-windows.yml'
 
 jobs:
-  build:
+  build-windows:
     runs-on: windows-latest
+    permissions:
+      contents: read
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install .NET 8
+        uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: "8.0.x"
-      - name: Restaurar
+          dotnet-version: '8.0.x'
+
+      - name: Restore
         run: dotnet restore sync/ColibriSync/ColibriSync.csproj
-      - name: Compilar y publicar EXE autónomo
-        run: dotnet publish sync/ColibriSync/ColibriSync.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o salida/ColibriEngine
-      - name: Subir artefacto
+
+      - name: Build
+        run: dotnet build sync/ColibriSync/ColibriSync.csproj --configuration Release --no-restore
+
+      - name: Publish Windows x64
+        run: dotnet publish sync/ColibriSync/ColibriSync.csproj --configuration Release --runtime win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true --output artifacts/ColibriEngine
+
+      - name: Upload executable
         uses: actions/upload-artifact@v4
         with:
           name: COLIBRI_ENGINE_4_0_WINDOWS
-          path: salida/ColibriEngine/**
+          path: artifacts/ColibriEngine/**
+          if-no-files-found: error
+          retention-days: 30

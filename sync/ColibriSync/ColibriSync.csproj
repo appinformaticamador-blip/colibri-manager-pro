@@ -12,7 +12,7 @@
     <Authors>C.G. 21 S.L.</Authors>
     <Company>C.G. 21 S.L.</Company>
     <Product>Colibrí Engine</Product>
-    <Description>Colibrí Engine 4.0 - Integridad automática, auditoría diaria y NUMIER LIVE</Description>
+    <Description>Colibrí Engine 4.0 - Integridad automática</Description>
     <InvariantGlobalization>false</InvariantGlobalization>
   </PropertyGroup>
   <ItemGroup>
