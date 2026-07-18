@@ -6,13 +6,36 @@ const daysInMonth=d=>new Date(new Date(d+'T12:00:00').getFullYear(),new Date(d+'
 const dateOnly=v=>String(v||'').slice(0,10);
 const overlaps=(start,end,a,b)=>start<b&&end>a;
 
+const SCHEDULE_DAYS=['Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','Domingo'];
+const SCHEDULE_SLOTS=['08:00-10:00','10:00-12:00','12:00-14:00','14:00-16:00','16:00-18:00','18:00-20:00','20:00-22:00','22:00-23:30'];
+const slotHours=slot=>{const[a,b]=slot.split('-'),[ah,am]=a.split(':').map(Number),[bh,bm]=b.split(':').map(Number);return((bh*60+bm)-(ah*60+am))/60};
+const isoWeekId=date=>{const d=new Date(date+'T12:00:00'),x=new Date(Date.UTC(d.getFullYear(),d.getMonth(),d.getDate())),day=x.getUTCDay()||7;x.setUTCDate(x.getUTCDate()+4-day);const y=new Date(Date.UTC(x.getUTCFullYear(),0,1));return `${x.getUTCFullYear()}-W${String(Math.ceil((((x-y)/86400000)+1)/7)).padStart(2,'0')}`};
+const scheduleEntries=(data,weekId,day,slot)=>{
+ const direct=data?.[`${weekId}|${day}|${slot}`];
+ const nested=data?.[day]?.[slot];
+ const arr=Array.isArray(direct)?direct:Array.isArray(nested)?nested:[];
+ return arr.filter(e=>{const v=String(e?.id??e??'').toLowerCase();return v&&v!=='closed'&&v!=='cerrado'&&v!=='__closed__'});
+};
+export async function loadScheduledLabor(supabase,from,to){
+ if(!supabase)return {hours:0,cost:0,rows:[],byShift:{}};
+ const dates=[];for(let d=new Date(from+'T12:00:00'),end=new Date(to+'T12:00:00');d<end;d.setDate(d.getDate()+1))dates.push(d.toISOString().slice(0,10));
+ const weekIds=[...new Set(dates.map(isoWeekId))];
+ if(!weekIds.length)return {hours:0,cost:0,rows:[],byShift:{}};
+ const {data}=await supabase.from('work_schedule_weeks').select('week_id,data').eq('restaurant_id','colibri').in('week_id',weekIds);
+ const weeks=new Map((data||[]).map(r=>[String(r.week_id),r.data||{}]));
+ const rows=[];let hours=0;
+ dates.forEach(ds=>{const d=new Date(ds+'T12:00:00'),day=SCHEDULE_DAYS[(d.getDay()+6)%7],wid=isoWeekId(ds),week=weeks.get(wid)||{};SCHEDULE_SLOTS.forEach(slot=>{const entries=scheduleEntries(week,wid,day,slot),h=slotHours(slot)*entries.length;if(h>0){hours+=h;rows.push({date:ds,day,slot,employees:entries.length,hours:h});}})});
+ return {hours,cost:hours*7,rows};
+}
+
 export async function loadRealProfitability(supabase,from,to,clockRows=[]){
  if(!supabase)return {fixed:0,variable:0,laborAccrued:0,payments:0,hours:0,details:{fixed:[],variable:[],payments:[]}};
- const [{data:fixedRows},{data:variableRows},{data:employeeRates},{data:paymentsRows}]=await Promise.all([
+ const [{data:fixedRows},{data:variableRows},{data:employeeRates},{data:paymentsRows},scheduled]=await Promise.all([
   supabase.from('business_fixed_expenses').select('*').lte('start_date',to).or(`end_date.is.null,end_date.gte.${from}`).eq('active',true),
   supabase.from('business_variable_expenses').select('*').gte('expense_date',from).lt('expense_date',to).order('expense_date',{ascending:false}),
   supabase.from('employee_cost_profiles').select('*').eq('active',true),
-  supabase.from('employee_payments').select('*').gte('payment_date',from).lt('payment_date',to).order('payment_date',{ascending:false})
+  supabase.from('employee_payments').select('*').gte('payment_date',from).lt('payment_date',to).order('payment_date',{ascending:false}),
+  loadScheduledLabor(supabase,from,to)
  ]);
  const start=new Date(from+'T00:00:00'),end=new Date(to+'T00:00:00');
  let fixed=0; const fixedDetails=[];
@@ -24,10 +47,11 @@ export async function loadRealProfitability(supabase,from,to,clockRows=[]){
  const variable=(variableRows||[]).reduce((a,x)=>a+Number(x.amount||0),0);
  const rates=new Map((employeeRates||[]).map(x=>[String(x.employee_id||x.employee_name||'').toLowerCase(),Number(x.hourly_cost||0)]));
  const byEmp=new Map();(clockRows||[]).slice().sort((a,b)=>new Date(a.created_at)-new Date(b.created_at)).forEach(r=>{const k=String(r.employee_id||r.employee_name||'').toLowerCase();if(!byEmp.has(k))byEmp.set(k,[]);byEmp.get(k).push(r)});
- let laborAccrued=0,hours=0;
- byEmp.forEach((rows,key)=>{let open=null;for(const r of rows){const typ=String(r.type||'').toLowerCase();if(typ==='entrada')open=r;else if(typ==='salida'&&open){const a=new Date(open.created_at),b=new Date(r.created_at);if(b>a&&overlaps(a,b,start,end)){const clippedA=a<start?start:a,clippedB=b>end?end:b;const h=Math.max(0,(clippedB-clippedA)/3600000);hours+=h;laborAccrued+=h*Number(rates.get(key)||rates.get(String(open.employee_name||'').toLowerCase())||0)}open=null}}});
+ let clockHours=0,clockAccrued=0;
+ byEmp.forEach((rows,key)=>{let open=null;for(const r of rows){const typ=String(r.type||'').toLowerCase();if(typ==='entrada')open=r;else if(typ==='salida'&&open){const a=new Date(open.created_at),b=new Date(r.created_at);if(b>a&&overlaps(a,b,start,end)){const clippedA=a<start?start:a,clippedB=b>end?end:b;const h=Math.max(0,(clippedB-clippedA)/3600000);clockHours+=h;clockAccrued+=h*Number(rates.get(key)||rates.get(String(open.employee_name||'').toLowerCase())||0)}open=null}}});
+ const hours=Number(scheduled?.hours||0),laborAccrued=hours*7;
  const payments=(paymentsRows||[]).reduce((a,x)=>a+Number(x.amount||0),0);
- return {fixed,variable,laborAccrued,payments,hours,details:{fixed:fixedDetails,variable:variableRows||[],payments:paymentsRows||[]},rates};
+ return {fixed,variable,laborAccrued,payments,hours,clockHours,clockAccrued,scheduleRows:scheduled?.rows||[],details:{fixed:fixedDetails,variable:variableRows||[],payments:paymentsRows||[]},rates};
 }
 
 function ExpenseForm({type,onSave,initial,onCancel}){
@@ -58,5 +82,5 @@ export default function RealBusinessProfitability({supabase,loadSalesRange,loadC
  async function finish(x){const d=prompt('Fecha final del gasto',isoToday());if(!d)return;await supabase.from('business_fixed_expenses').update({end_date:d,active:false,updated_at:new Date().toISOString()}).eq('id',x.id);load()}
  async function remove(table,id){if(!confirm('¿Eliminar este registro? Úsalo solo si se creó por error.'))return;await supabase.from(table).delete().eq('id',id);load()}
  const margin=summary?.sales?summary.realProfit/summary.sales*100:0;
- return <div className="realProfitability"><div className="profitSubTabs">{[['resultado','Resultado real'],['fijos','Gastos fijos'],['variables','Gastos variables'],['personal','Personal']].map(([id,l])=><button key={id} className={tab===id?'active':''} onClick={()=>setTab(id)}>{l}</button>)}</div>{tab==='resultado'&&<><div className="card realRange"><h2>Cuenta de resultados real</h2><div className="row controls"><label>Desde<input type="date" value={range.from} onChange={e=>setRange({...range,from:e.target.value})}/></label><label>Hasta<input type="date" value={range.to} onChange={e=>setRange({...range,to:e.target.value})}/></label><button onClick={loadSummary}>Calcular</button></div></div><div className="realResultGrid"><div><span>Ventas</span><b>{euro(summary?.sales)}</b></div><div><span>Coste productos</span><b>- {euro(summary?.productCost)}</b></div><div><span>Margen bruto</span><b>{euro(summary?.gross)}</b></div><div><span>Personal devengado</span><b>- {euro(summary?.laborAccrued)}</b></div><div><span>Gastos fijos imputados</span><b>- {euro(summary?.fixed)}</b></div><div><span>Gastos variables</span><b>- {euro(summary?.variable)}</b></div><div className="featured"><span>Beneficio real estimado</span><b>{euro(summary?.realProfit)}</b><small>{margin.toFixed(1)}% sobre ventas</small></div><div><span>Pagos de personal realizados</span><b>{euro(summary?.payments)}</b><small>Control de tesorería, no se descuenta dos veces</small></div></div></>}{tab==='fijos'&&<div className="grid"><div className="card"><h2>{editing?'Editar':'Añadir'} gasto fijo</h2><ExpenseForm type="fixed" initial={editing} onSave={saveFixed} onCancel={editing?()=>setEditing(null):null}/></div><div className="card"><h2>Gastos fijos con vigencia</h2>{fixed.map(x=><article className="expenseRow" key={x.id}><div><b>{x.name}</b><small>{x.category||'Sin categoría'} · desde {dateOnly(x.start_date)} {x.end_date?`hasta ${dateOnly(x.end_date)}`:'sin fecha de fin'}</small></div><strong>{euro(x.monthly_amount)}/mes</strong><button onClick={()=>setEditing(x)}>Editar</button>{x.active&&<button onClick={()=>finish(x)}>Finalizar</button>}<button className="red" onClick={()=>remove('business_fixed_expenses',x.id)}>Eliminar</button></article>)}</div></div>}{tab==='variables'&&<div className="grid"><div className="card"><h2>Añadir gasto imprevisto o variable</h2><ExpenseForm type="variable" onSave={saveVariable}/></div><div className="card"><h2>Histórico de gastos variables</h2>{variable.map(x=><article className="expenseRow" key={x.id}><div><b>{x.name}</b><small>{dateOnly(x.expense_date)} · {x.category||'Sin categoría'} · {x.payment_method||'-'}</small></div><strong>{euro(x.amount)}</strong><button className="red" onClick={()=>remove('business_variable_expenses',x.id)}>Eliminar</button></article>)}</div></div>}{tab==='personal'&&<PersonnelPanel supabase={supabase}/>}</div>
+ return <div className="realProfitability"><div className="profitSubTabs">{[['resultado','Resultado real'],['fijos','Gastos fijos'],['variables','Gastos variables'],['personal','Personal']].map(([id,l])=><button key={id} className={tab===id?'active':''} onClick={()=>setTab(id)}>{l}</button>)}</div>{tab==='resultado'&&<><div className="card realRange"><h2>Cuenta de resultados real</h2><div className="row controls"><label>Desde<input type="date" value={range.from} onChange={e=>setRange({...range,from:e.target.value})}/></label><label>Hasta<input type="date" value={range.to} onChange={e=>setRange({...range,to:e.target.value})}/></label><button onClick={loadSummary}>Calcular</button></div></div><div className="realResultGrid"><div><span>Ventas</span><b>{euro(summary?.sales)}</b></div><div><span>Coste productos</span><b>- {euro(summary?.productCost)}</b></div><div><span>Margen bruto</span><b>{euro(summary?.gross)}</b></div><div><span>Personal estimado por cuadrante</span><b>- {euro(summary?.laborAccrued)}</b></div><div><span>Gastos fijos imputados</span><b>- {euro(summary?.fixed)}</b></div><div><span>Gastos variables</span><b>- {euro(summary?.variable)}</b></div><div className="featured"><span>Beneficio real estimado</span><b>{euro(summary?.realProfit)}</b><small>{margin.toFixed(1)}% sobre ventas</small></div><div><span>Pagos de personal realizados</span><b>{euro(summary?.payments)}</b><small>Control de tesorería, no se descuenta dos veces</small></div></div></>}{tab==='fijos'&&<div className="grid"><div className="card"><h2>{editing?'Editar':'Añadir'} gasto fijo</h2><ExpenseForm type="fixed" initial={editing} onSave={saveFixed} onCancel={editing?()=>setEditing(null):null}/></div><div className="card"><h2>Gastos fijos con vigencia</h2>{fixed.map(x=><article className="expenseRow" key={x.id}><div><b>{x.name}</b><small>{x.category||'Sin categoría'} · desde {dateOnly(x.start_date)} {x.end_date?`hasta ${dateOnly(x.end_date)}`:'sin fecha de fin'}</small></div><strong>{euro(x.monthly_amount)}/mes</strong><button onClick={()=>setEditing(x)}>Editar</button>{x.active&&<button onClick={()=>finish(x)}>Finalizar</button>}<button className="red" onClick={()=>remove('business_fixed_expenses',x.id)}>Eliminar</button></article>)}</div></div>}{tab==='variables'&&<div className="grid"><div className="card"><h2>Añadir gasto imprevisto o variable</h2><ExpenseForm type="variable" onSave={saveVariable}/></div><div className="card"><h2>Histórico de gastos variables</h2>{variable.map(x=><article className="expenseRow" key={x.id}><div><b>{x.name}</b><small>{dateOnly(x.expense_date)} · {x.category||'Sin categoría'} · {x.payment_method||'-'}</small></div><strong>{euro(x.amount)}</strong><button className="red" onClick={()=>remove('business_variable_expenses',x.id)}>Eliminar</button></article>)}</div></div>}{tab==='personal'&&<PersonnelPanel supabase={supabase}/>}</div>
 }
