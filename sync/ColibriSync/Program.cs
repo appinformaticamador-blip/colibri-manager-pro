@@ -199,7 +199,11 @@ public sealed class ColibriSyncApp
             {
                 if (oa.Total <= 0 && openTotals.TryGetValue(oa.CabId, out var tv)) oa.Total = tv;
             }
-            await api.UpsertLinesAsync(openLines);
+            if (openLines.Count > 0)
+            {
+                await api.DeleteLinesForCabIdsAsync(openLines.Select(l => l.CabId));
+                await api.UpsertLinesAsync(openLines);
+            }
         }
         await api.UpsertOpenAccountsAsync(openAccounts);
         await api.MarkOpenAccountsSnapshotAsync();
@@ -253,7 +257,21 @@ public sealed class ColibriSyncApp
         int missingInScope = scope.Count(t => !existingIds.Contains(t.CabId));
         Log($"Cabeceras escaneadas: {scanned:N0}. Cobrados: {totalCobrados:N0}. Ámbito verificado: {scope.Count:N0}. Faltantes detectados: {missingInScope:N0}.");
 
-        var ids = missingTickets.Select(t => t.CabId).ToHashSet();
+        // Refresca siempre hoy y ayer, además de recuperar cabeceras históricas faltantes.
+        // Antes de insertar las líneas elimina la instantánea anterior del CAB_ID para impedir
+        // que una cuenta abierta y su ticket definitivo convivan y dupliquen conceptos.
+        var recentTickets = candidates
+            .Where(t => DateTime.TryParseExact(t.Fecha, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var d) && d >= recentFrom)
+            .ToList();
+        var ticketsToRefresh = recentTickets
+            .Concat(missingTickets)
+            .GroupBy(t => t.CabId)
+            .Select(g => g.First())
+            .OrderBy(t => t.CabId)
+            .Take(Math.Max(_config.MaxTicketsPerSync, recentTickets.Count))
+            .ToList();
+
+        var ids = ticketsToRefresh.Select(t => t.CabId).ToHashSet();
         var lines = new List<TicketLineDto>();
         var totals = new Dictionary<long, decimal>();
         int detailScanned = 0;
@@ -282,7 +300,7 @@ public sealed class ColibriSyncApp
                 });
             }
 
-            foreach (var t in missingTickets)
+            foreach (var t in ticketsToRefresh)
             {
                 t.Total = totals.GetValueOrDefault(t.CabId);
                 t.Efectivo = t.Tarjeta > 0 || t.Cheque > 0
@@ -290,9 +308,10 @@ public sealed class ColibriSyncApp
                     : t.Total;
             }
 
-            await api.UpsertTicketsAsync(missingTickets);
+            await api.UpsertTicketsAsync(ticketsToRefresh);
+            await api.DeleteLinesForCabIdsAsync(ids);
             await api.UpsertLinesAsync(lines);
-            Log($"Recuperados/sincronizados: {missingTickets.Count:N0} tickets y {lines.Count:N0} líneas.");
+            Log($"Integridad: {missingTickets.Count:N0} tickets recuperados, {ticketsToRefresh.Count:N0} refrescados y {lines.Count:N0} líneas consolidadas.");
         }
         else
         {
@@ -567,6 +586,21 @@ public sealed class SupabaseRest : IDisposable
     }
 
     public async Task UpsertTicketsAsync(IEnumerable<TicketDto> rows) => await Upsert("numier_tickets", "cab_id", rows);
+    public async Task DeleteLinesForCabIdsAsync(IEnumerable<long> cabIds)
+    {
+        var uniqueIds = cabIds.Where(id => id > 0).Distinct().ToList();
+        const int chunkSize = 150;
+        for (int offset = 0; offset < uniqueIds.Count; offset += chunkSize)
+        {
+            var chunk = uniqueIds.Skip(offset).Take(chunkSize).ToArray();
+            string filter = string.Join(',', chunk.Select(id => id.ToString(CultureInfo.InvariantCulture)));
+            var req = new HttpRequestMessage(HttpMethod.Delete, $"numier_ticket_lines?cab_id=in.({filter})");
+            req.Headers.Add("Prefer", "return=minimal");
+            var resp = await _http.SendAsync(req);
+            var txt = await resp.Content.ReadAsStringAsync();
+            if (!resp.IsSuccessStatusCode) throw new Exception("Supabase delete ticket lines: " + txt);
+        }
+    }
     public async Task UpsertLinesAsync(IEnumerable<TicketLineDto> rows) => await Upsert("numier_ticket_lines", "line_key", rows);
     public async Task UpsertArticlesAsync(IEnumerable<ArticleDto> rows) => await Upsert("numier_articles", "article_code", rows);
     public async Task UpsertOpenAccountsAsync(IEnumerable<OpenAccountDto> rows) => await Upsert("numier_open_accounts", "cab_id", rows);

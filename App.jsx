@@ -220,6 +220,22 @@ function ticketFiscalRows(tickets,lines){
  });
 }
 
+function normalizeTicketLines(lines,ticketTotal){
+ const rows=Array.isArray(lines)?lines:[];
+ const target=Math.round(Number(ticketTotal||0)*100);
+ const sum=rows.reduce((a,l)=>a+Math.round(Number(l.importe||0)*100),0);
+ if(!target||sum<=target+1)return rows;
+ // Protección frente a dos instantáneas del mismo ticket guardadas con line_key distinto.
+ // Busca un bloque completo cuyo total coincida con la cabecera y conserva el último,
+ // que corresponde normalmente a la instantánea definitiva al cerrar el ticket.
+ let start=0,current=0,best=null;
+ for(let end=0;end<rows.length;end++){
+  current+=Math.round(Number(rows[end].importe||0)*100);
+  while(start<=end&&current>target+1){current-=Math.round(Number(rows[start].importe||0)*100);start++;}
+  if(Math.abs(current-target)<=1)best=[start,end+1];
+ }
+ return best?rows.slice(best[0],best[1]):rows;
+}
 async function loadTicketFull(cabId){
  if(!supabase||!cabId)return {ticket:null,lines:[],articles:new Map()};
  const [ticketRes,lineRes,articles]=await Promise.all([
@@ -227,7 +243,9 @@ async function loadTicketFull(cabId){
   supabase.from('numier_ticket_lines').select('*').eq('cab_id',cabId).order('line_key',{ascending:true}).limit(500),
   loadArticlesMap()
  ]);
- return {ticket:ticketRes.data||null,lines:lineRes.data||[],articles,error:ticketRes.error?.message||lineRes.error?.message||null};
+ const ticket=ticketRes.data||null;
+ const lines=normalizeTicketLines(lineRes.data||[],ticket?.total);
+ return {ticket,lines,articles,error:ticketRes.error?.message||lineRes.error?.message||null};
 }
 function ticketText({ticket,lines,articles,account}){
  const title=account?(account.zona==='barra'?`CUENTA RÁPIDA ${account.mesa}`:`MESA ${account.mesa_numero}`):`TICKET ${ticket?.numdoc||ticket?.cab_id||''}`;
