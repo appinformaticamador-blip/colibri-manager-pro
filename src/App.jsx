@@ -6,6 +6,7 @@ import './profitability-rc392.css';
 import ProfessionalRecipes from './modules/profitability/ProfessionalRecipes';
 import EditableMargins from './modules/profitability/EditableMargins';
 import RealBusinessProfitability,{loadRealProfitability} from './modules/profitability/RealBusinessProfitability';
+import PeoplePortal from './modules/people/PeoplePortal';
 import {buildMarginProducts,includedMarginAverage} from './modules/profitability/profitabilityModel';
 import {buildNumierCatalog,mergeResolvedNumierPrice,numierPriceText,resolveLinkSalePrice} from './modules/profitability/numierPricing';
 
@@ -995,7 +996,7 @@ class ModuleErrorBoundary extends React.Component{
  render(){if(this.state.error)return <div className="card"><h2>⚠️ Error en {this.props.name}</h2><p>El módulo ha fallado, pero el ERP sigue operativo.</p><pre style={{whiteSpace:'pre-wrap'}}>{String(this.state.error?.message||this.state.error)}</pre><button onClick={()=>{localStorage.removeItem('colibriSchedule');localStorage.removeItem('colibriScheduleEmployees');this.setState({error:null});location.reload()}}>Reiniciar datos locales del cuadrante</button></div>;return this.props.children}
 }
 
-function App(){const host=location.hostname;const onlyClock=host.startsWith('fichar.')||location.pathname.includes('fichar');const [authed,setAuthed]=useState(false);return <>{onlyClock?<ClockPage/>:<>{!authed?<Login onOk={()=>setAuthed(true)}/>:<Manager/>}</>}</>}
+function App(){const host=location.hostname;const onlyClock=host.startsWith('fichar.')||location.pathname.includes('fichar');const [authed,setAuthed]=useState(false);return <>{onlyClock?<PeoplePortal supabase={supabase} Brand={Brand}/>:<>{!authed?<Login onOk={()=>setAuthed(true)}/>:<Manager/>}</>}</>}
 function Login({onOk}){const[pin,setPin]=useState('');return <main className="login"><Brand/><div className="card narrow"><h2>Acceso Manager</h2><input placeholder="Clave gerente" type="password" value={pin} onChange={e=>setPin(e.target.value)}/><button onClick={()=>pin===ADMIN_PIN?onOk():alert('Clave incorrecta')}>Entrar</button><a href="/fichar" className="muted">Ir a fichaje empleados</a></div></main>}
 function Brand(){return <div className="brand"><div className="brandMark"><img src="/colibri-brand.png" onError={e=>e.currentTarget.style.display='none'}/></div><div><h1>Colibrí <span>ERP</span></h1><p>Brasería El Colibrí</p></div></div>}
 function Manager(){
