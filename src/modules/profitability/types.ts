@@ -176,9 +176,18 @@ export interface NumierLink {
   is_primary?: boolean | null
 }
 
+export interface ArticleManualCost {
+  article_code: string
+  manual_unit_cost?: number | null
+  reason?: string | null
+  updated_at?: string | null
+  updated_by?: string | null
+  excluded_from_margin?: boolean | null
+}
+
 export interface CostControlEvent {
   id: string
-  entity_type: 'master_item' | 'recipe'
+  entity_type: 'master_item' | 'recipe' | 'numier_article'
   entity_id: string
   event_type: string
   previous_cost?: number | null

@@ -1,10 +1,10 @@
 import { resolveLinkSalePrice } from './numierPricing'
 import { calculateRecipe, findAffectedRecipeIds, resolveMasterUnitCost } from './recipeCosting'
-import type { MasterItem, NumierArticle, NumierLink, PurchaseItem, Recipe, RecipeCalculation, RecipeIngredient, UnitCostResolution } from './types'
+import type { ArticleManualCost, MasterItem, NumierArticle, NumierLink, PurchaseItem, Recipe, RecipeCalculation, RecipeIngredient, UnitCostResolution } from './types'
 
 export interface MarginProduct {
   id: string
-  entityType: 'master_item' | 'recipe'
+  entityType: 'master_item' | 'recipe' | 'numier_article'
   entityId: string
   productName: string
   articleName: string
@@ -32,6 +32,7 @@ interface BuildMarginProductsInput {
   ingredients: RecipeIngredient[]
   purchaseItems: PurchaseItem[]
   numierCatalog: NumierArticle[]
+  articleCosts?: ArticleManualCost[]
 }
 
 function metrics(cost: number | null, sale: number | null) {
@@ -40,7 +41,7 @@ function metrics(cost: number | null, sale: number | null) {
   return { profit, margin: profit / sale * 100, marginOnCost: cost > 0 ? profit / cost * 100 : null }
 }
 
-export function buildMarginProducts({ links, masters, recipes, ingredients, purchaseItems, numierCatalog }: BuildMarginProductsInput): MarginProduct[] {
+export function buildMarginProducts({ links, masters, recipes, ingredients, purchaseItems, numierCatalog, articleCosts = [] }: BuildMarginProductsInput): MarginProduct[] {
   const direct = links.flatMap(link => {
     const master = masters.find(item => String(item.id) === String(link.master_item_id))
     if (!master) return []
@@ -79,8 +80,25 @@ export function buildMarginProducts({ links, masters, recipes, ingredients, purc
       recipeCalculation: calculation, affectedRecipeIds: [], source: recipe,
     }
   })
-  return [...direct, ...recipeRows]
+  const represented = new Set([...direct, ...recipeRows].map(row => String(row.articleCode)))
+  const manualByCode = new Map(articleCosts.map(item => [String(item.article_code), item]))
+  const catalogRows = numierCatalog.filter(article => !represented.has(String(article.article_code))).map(article => {
+    const code = String(article.article_code)
+    const manual = manualByCode.get(code)
+    const cost = Number(manual?.manual_unit_cost || 0) > 0 ? Number(manual?.manual_unit_cost) : null
+    const saleValue = Number(article.sale_price || article.price || 0)
+    const sale = saleValue > 0 ? saleValue : null
+    return {
+      id: `article:${code}`, entityType: 'numier_article' as const, entityId: code,
+      productName: article.article_name || code, articleName: article.article_name || code, articleCode: code,
+      linkedArticles: [], cost, automaticCost: null, sale, ...metrics(cost, sale),
+      excluded: Boolean(manual?.excluded_from_margin), corrected: cost !== null, complete: cost !== null && sale !== null,
+      costResolution: null, recipeCalculation: null, affectedRecipeIds: [], source: article as unknown as MasterItem,
+    }
+  })
+  return [...direct, ...recipeRows, ...catalogRows]
 }
+
 
 export function includedMarginAverage(rows: MarginProduct[]): number | null {
   const values = rows.filter(row => !row.excluded && row.margin !== null).map(row => Number(row.margin))
