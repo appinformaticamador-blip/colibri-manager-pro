@@ -682,6 +682,35 @@ function scheduleWhatsAppText(data,weekId){
  return lines.join('\n');
 }
 function copyText(text){navigator.clipboard?.writeText(text).then(()=>alert('Texto copiado para WhatsApp')).catch(()=>{const t=document.createElement('textarea');t.value=text;document.body.appendChild(t);t.select();document.execCommand('copy');t.remove();alert('Texto copiado para WhatsApp')})}
+
+function isoWeekMonday(weekId){
+ const {year,week}=parseWeekId(weekId);const jan4=new Date(year,0,4);const day=jan4.getDay()||7;const monday=new Date(jan4);monday.setDate(jan4.getDate()-day+1+(week-1)*7);monday.setHours(0,0,0,0);return monday
+}
+function slotForHour(hour){return SLOTS.find(slot=>{const [a,b]=slot.split('-');const toN=v=>{const[x,y]=v.split(':').map(Number);return x+y/60};return hour>=toN(a)&&hour<toN(b)})||null}
+function SmartStaffPlanner({weekId,weekData,onApply}){
+ const [loading,setLoading]=useState(false),[error,setError]=useState(''),[history,setHistory]=useState([]),[open,setOpen]=useState(true);
+ useEffect(()=>{loadHistory()},[]);
+ async function loadHistory(){
+  if(!supabase){setError('Supabase no está configurado. El planificador necesita el histórico de Numier.');return}
+  setLoading(true);setError('');
+  try{const end=new Date(),start=new Date();start.setDate(end.getDate()-90);const{data,error}=await supabase.from('numier_tickets').select('hora,total,estado').gte('hora',start.toISOString()).lt('hora',end.toISOString()).order('hora',{ascending:true}).limit(20000);if(error)throw error;setHistory((data||[]).filter(t=>String(t.estado||'C').toUpperCase()==='C'))}catch(e){setError(e?.message||String(e))}finally{setLoading(false)}
+ }
+ const analysis=useMemo(()=>{
+  const byDaySlot=new Map(),datesByDay=new Map();
+  history.forEach(t=>{const d=new Date(t.hora);if(Number.isNaN(d.getTime()))return;const di=(d.getDay()+6)%7,day=DAYS[di],slot=slotForHour(d.getHours()+d.getMinutes()/60);if(!slot)return;const date=d.toISOString().slice(0,10);datesByDay.set(day,(datesByDay.get(day)||new Set()).add(date));const key=`${day}|${slot}`,r=byDaySlot.get(key)||{sales:0,tickets:0};r.sales+=Number(t.total||0);r.tickets++;byDaySlot.set(key,r)});
+  const rows=[];DAYS.forEach(day=>SLOTS.forEach(slot=>{const raw=byDaySlot.get(`${day}|${slot}`)||{sales:0,tickets:0};const n=Math.max(1,datesByDay.get(day)?.size||1);const sales=raw.sales/n,tickets=raw.tickets/n;let recommended=Math.max(1,Math.ceil(sales/120),Math.ceil(tickets/14));if(sales<35&&tickets<5)recommended=1;recommended=Math.min(MAX_PER_SLOT,recommended);const current=(weekData?.[day]?.[slot]||[]).filter(id=>id!==CLOSED_ID).length;const hours=h(slot),cost=recommended*hours*7,ratio=sales>0?cost/sales*100:0;rows.push({day,slot,sales,tickets,recommended,current,cost,ratio,diff:current-recommended})}));return rows
+ },[history,weekData]);
+ const summary=useMemo(()=>{const sales=analysis.reduce((a,r)=>a+r.sales,0),recommendedCost=analysis.reduce((a,r)=>a+r.cost,0),currentCost=analysis.reduce((a,r)=>a+r.current*h(r.slot)*7,0);return{sales,recommendedCost,currentCost,diff:currentCost-recommendedCost,ratio:sales?recommendedCost/sales*100:0,alerts:analysis.filter(r=>r.diff!==0).length}},[analysis]);
+ const proposal=useMemo(()=>Object.fromEntries(analysis.map(r=>[`${r.day}|${r.slot}`,r.recommended])),[analysis]);
+ return <div className="card smartPlanner">
+  <div className="row between smartPlannerHead"><div><span className="sectionEyebrow">PERSONAL 6.0 · PLANIFICADOR INTELIGENTE</span><h2>Plantilla recomendada para {weekId}</h2><p>Calculada con los últimos 90 días: ventas y tickets medios de cada día y franja.</p></div><button onClick={()=>setOpen(v=>!v)}>{open?'Ocultar':'Ver análisis'}</button></div>
+  {error&&<div className="warnBox">{error}</div>}
+  <div className="plannerKpis"><div><span>Ventas previstas</span><b>{money(summary.sales)}</b></div><div><span>Coste recomendado</span><b>{money(summary.recommendedCost)}</b></div><div><span>Personal / ventas</span><b>{summary.ratio.toFixed(1)}%</b></div><div><span>Ajustes detectados</span><b>{summary.alerts}</b></div></div>
+  <div className="plannerActions"><button onClick={loadHistory}>{loading?'Analizando...':'Actualizar histórico'}</button><button className="plannerPrimary" disabled={!history.length} onClick={()=>{if(confirm('¿Aplicar la propuesta inteligente? Se reemplazarán las asignaciones de la semana, sin marcar días como cerrados.'))onApply(proposal)}}>Generar y aplicar propuesta</button></div>
+  {open&&<><div className="plannerLegend"><span className="okDot"></span>Correcto <span className="warnDot"></span>Falta personal <span className="overDot"></span>Exceso estimado</div><div className="plannerTableWrap"><table className="plannerTable"><thead><tr><th>Día</th><th>Franja</th><th>Venta prevista</th><th>Tickets</th><th>Actual</th><th>Recomendado</th><th>Lectura</th></tr></thead><tbody>{analysis.map(r=><tr key={r.day+r.slot} className={r.diff<0?'plannerUnder':r.diff>0?'plannerOver':'plannerOk'}><td>{r.day}</td><td>{r.slot}</td><td>{money(r.sales)}</td><td>{r.tickets.toFixed(1)}</td><td>{r.current}</td><td><b>{r.recommended}</b></td><td>{r.diff<0?`Faltan ${Math.abs(r.diff)}`:r.diff>0?`Sobran ${r.diff}`:'Equilibrado'}</td></tr>)}</tbody></table></div></>}
+ </div>
+}
+
 function Schedule(){
  const RESTAURANT_ID='colibri';
  const STORAGE='colibriCuadrantesRC332_CACHE';
@@ -837,6 +866,7 @@ function Schedule(){
  async function duplicateNextWeek(){const nextId=shiftWeek(weekId,1);await saveWeek(nextId,weekData);setWeekId(nextId);alert('Duplicada a la semana siguiente')}
  function copyDay(){if(sourceDay===targetDay)return;const w=cleanWeek(weekData);SLOTS.forEach(s=>w[targetDay][s]=[...(w[sourceDay][s]||[])]);saveWeek(weekId,w);alert(`${sourceDay} copiado a ${targetDay}`)}
  function quickCopy(a,b){const w=cleanWeek(weekData);SLOTS.forEach(s=>w[b][s]=[...(w[a][s]||[])]);saveWeek(weekId,w)}
+ function applySmartProposal(proposal){const w=cleanWeek(weekData);const loads=Object.fromEntries(employees.map(e=>[e.id,0]));DAYS.forEach(day=>SLOTS.forEach(slot=>{if(isClosed(day,slot))return;const count=Math.max(0,Math.min(MAX_PER_SLOT,Number(proposal?.[`${day}|${slot}`]||0)));const chosen=employees.slice().sort((a,b)=>(loads[a.id]||0)-(loads[b.id]||0)).slice(0,count);w[day][slot]=chosen.map(e=>e.id);chosen.forEach(e=>loads[e.id]=(loads[e.id]||0)+h(slot))}));saveWeek(weekId,w);alert('Propuesta inteligente aplicada. Revisa las asignaciones antes de publicar el cuadrante.')}
  function addEmployeeToCell(employeeId,day,slot){
   if(!employeeId)return false;
   const w=cleanWeek(weekData);
@@ -906,6 +936,7 @@ function Schedule(){
    <div className="copyDayBox"><select value={sourceDay} onChange={e=>setSourceDay(e.target.value)}>{DAYS.map(d=><option key={d}>{d}</option>)}</select><span>→</span><select value={targetDay} onChange={e=>setTargetDay(e.target.value)}>{DAYS.map(d=><option key={d}>{d}</option>)}</select><button onClick={copyDay}>Copiar día</button></div>
    <div className="quickCopyDays"><b>Copias rápidas:</b>{DAYS.slice(0,-1).map((d,i)=><button key={d} onClick={()=>quickCopy(d,DAYS[i+1])}>{d} → {DAYS[i+1]}</button>)}</div>
   </div>
+  <SmartStaffPlanner weekId={weekId} weekData={weekData} onApply={applySmartProposal}/>
   <div className="card mainScheduleCard scheduleCard" id="printSchedule">
    <div className="row between scheduleTitleBar"><div><h2>Cuadrante semanal {weekId}</h2><p className="mutedText">Fuente única: Supabase. En PC arrastra una etiqueta para DUPLICARLA en otra franja. En móvil toca un empleado y luego toca la celda destino.</p></div><b className="scheduleVersion">{totalHours.toFixed(1)} h</b></div>
    {warnings.length>0&&<div className="warnBox">{warnings.join(' · ')}</div>}
