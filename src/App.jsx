@@ -496,9 +496,9 @@ function EstadoServicio({initialView='plano',focusAccount=null}){
  const[daily,setDaily]=useState(null);
  const[selected,setSelected]=useState(null);
  const[loading,setLoading]=useState(false);
- const[view,setView]=useState(initialView||'plano');
+ const[view,setView]=useState(()=>typeof window!=='undefined'&&window.innerWidth<=700&&initialView==='plano'?'lista':(initialView||'plano'));
  const[barDetails,setBarDetails]=useState(new Map());
- useEffect(()=>{setView(initialView||'plano')},[initialView]);
+ useEffect(()=>{setView(typeof window!=='undefined'&&window.innerWidth<=700&&initialView==='plano'?'lista':(initialView||'plano'))},[initialView]);
  useEffect(()=>{load();const t=setInterval(load,15000);return()=>clearInterval(t)},[]);
  useEffect(()=>{if(!focusAccount)return;const match=(state.open||[]).find(o=>String(o.cab_id)===String(focusAccount.cab_id)||String(o.mesa_numero)===String(focusAccount.mesa_numero));if(match)setSelected(match)},[focusAccount,state.open]);
  async function load(){setLoading(true);const [service,sales]=await Promise.all([loadServiceState(),loadSalesForDate(today())]);setState(service);setDaily(sales.daily);const bar=(service.open||[]).filter(o=>o.zona==='barra');const detailPairs=await Promise.all(bar.slice(0,30).map(async o=>[String(o.cab_id),await loadTicketFull(o.cab_id)]));setBarDetails(new Map(detailPairs));setLoading(false)}
@@ -524,42 +524,59 @@ function EstadoServicio({initialView='plano',focusAccount=null}){
 }
 
 
+function ticketDateKey(t){return new Date(t.hora||t.created_at).toISOString().slice(0,10)}
+function ticketsUntilHour(tickets,hour){return (tickets||[]).filter(t=>decimalHour(t.hora||t.created_at)<=hour)}
+function summarizeTicketRows(rows){const total=(rows||[]).reduce((a,t)=>a+Number(t.total||0),0);return {total,tickets:(rows||[]).length,ticketMean:(rows||[]).length?total/(rows||[]).length:0}}
+function comparisonPercent(current,base){if(!Number(base))return current>0?100:0;return ((Number(current)-Number(base))/Math.abs(Number(base)))*100}
+function scheduledHoursUntil(rows,date,hour){let total=0;(rows||[]).filter(r=>String(r.date)===String(date)).forEach(r=>{const [a,b]=String(r.slot||'').split('-');if(!a||!b)return;const [ah,am]=a.split(':').map(Number),[bh,bm]=b.split(':').map(Number);const start=ah+am/60,end=bh+bm/60;total+=Math.max(0,Math.min(hour,end)-start)*Number(r.employees||0)});return total}
+function currentShiftForHour(hour){return SHIFT_DEFS.find(s=>hour>=s.start&&hour<s.end)||SHIFT_DEFS[hour<8?0:SHIFT_DEFS.length-1]}
+function ComparisonMetric({label,current,base}){const pct=comparisonPercent(current,base);return <div className="commandCompareRow"><span>{label}</span><b>{money(base)}</b><em className={pct>=0?'ok':'bad'}>{pct>=0?'+':''}{pct.toFixed(1)}%</em></div>}
+
 function CommandCenter({initialView='plano',focusAccount=null}){
- const[data,setData]=useState({sales:null,service:null,profit:null,lines:[],costs:new Map(),sync:null});
+ const[data,setData]=useState({today:{tickets:[],lines:[]},history:{tickets:[],lines:[]},service:null,profit:null,costMap:new Map(),sync:null});
  const[loading,setLoading]=useState(false);const[now,setNow]=useState(new Date());
  async function load(){
   setLoading(true);
-  const date=today(),to=addDays(date,1);
-  const [sales,service,profit,sync]=await Promise.all([loadSalesForDate(date),loadServiceState(),loadRealProfitability(supabase,date,to,[]),loadSyncStatus()]);
-  let lines=[],costs=new Map();
-  if(supabase&&sales.tickets?.length){
-   const ids=sales.tickets.map(t=>t.cab_id).filter(Boolean);
-   for(let i=0;i<ids.length;i+=200){const {data:part}=await supabase.from('numier_ticket_lines').select('cab_id,articulo,descripcion,cantidad,importe').in('cab_id',ids.slice(i,i+200)).limit(10000);lines=lines.concat(part||[])}
-   const {data:c}=await supabase.from('profitability_article_costs').select('article_code,manual_unit_cost,excluded_from_margin').limit(20000);
-   costs=new Map((c||[]).map(x=>[String(x.article_code),x]));
-  }
-  setData({sales,service,profit,lines,costs,sync});setNow(new Date());setLoading(false);
+  try{
+   const date=today(),to=addDays(date,1),historyFrom=addDays(date,-35);
+   const [todayData,history,service,profit,sync,costMap]=await Promise.all([
+    loadSalesRange(date,to),loadSalesRange(historyFrom,to),loadServiceState(),loadRealProfitability(supabase,date,to,[]),loadSyncStatus(),loadProfitabilityCostMap()
+   ]);
+   setData({today:todayData,history,service,profit,costMap,sync});setNow(new Date());
+  }finally{setLoading(false)}
  }
  useEffect(()=>{load();const t=setInterval(load,30000);return()=>clearInterval(t)},[]);
- const tickets=data.sales?.tickets||[],open=data.service?.open||[],daily=data.sales?.daily||{};
- const pending=open.reduce((a,x)=>a+Number(x.total||0),0),sales=Number(daily.total||0),ticketCount=Number(daily.tickets||tickets.length||0);
- let productCost=0,knownRevenue=0,unknownRevenue=0;
- data.lines.forEach(l=>{const qty=Math.abs(Number(l.cantidad||0)),rev=Math.abs(Number(l.importe||0)),c=data.costs.get(String(l.articulo||''));if(c&&!c.excluded_from_margin&&Number.isFinite(Number(c.manual_unit_cost))){productCost+=qty*Number(c.manual_unit_cost);knownRevenue+=rev}else unknownRevenue+=rev});
- const p=data.profit||{},gross=sales-productCost,real=gross-Number(p.laborAccrued||0)-Number(p.fixed||0)-Number(p.variable||0),margin=sales?real/sales*100:0;
- const hour=now.getHours()+now.getMinutes()/60,elapsed=Math.max(1,hour-8),rate=sales/elapsed,forecast=hour<23.5?sales+rate*Math.max(0,23.5-hour):sales;
- const oldest=open.length?Math.max(...open.map(o=>minutesOpen(o.opened_at))):0;
- const alerts=[];
- if(oldest>120)alerts.push(`Hay una cuenta abierta desde hace ${durationShort(oldest)}.`);
- if(unknownRevenue>0)alerts.push(`${money(unknownRevenue)} de ventas aún no tienen coste configurado.`);
- if(data.sync&&Number(data.sync.pending_tickets||0)>0)alerts.push(`${data.sync.pending_tickets} tickets pendientes de sincronizar.`);
- if(real<0&&sales>0)alerts.push('El beneficio real estimado del día es negativo.');
- const coverage=sales?Math.max(0,100-unknownRevenue/sales*100):100;
+ const date=today(),hour=now.getHours()+now.getMinutes()/60,operatingProgress=Math.max(0,Math.min(1,(hour-8)/(23.5-8)));
+ const allToday=data.today?.tickets||[],currentTickets=ticketsUntilHour(allToday,hour),currentIds=new Set(currentTickets.map(t=>String(t.cab_id)));
+ const currentLines=(data.today?.lines||[]).filter(l=>currentIds.has(String(l.cab_id)));
+ const fullSummary=summarizeTicketRows(allToday),currentSummary=summarizeTicketRows(currentTickets),open=data.service?.open||[];
+ const pending=open.reduce((a,x)=>a+Number(x.total||0),0),p=data.profit||{};
+ const fullFin=periodFinancials(data.today?.lines||[],data.costMap),currentFin=periodFinancials(currentLines,data.costMap);
+ const fullGross=fullSummary.total-fullFin.cost,fullReal=fullGross-Number(p.laborAccrued||0)-Number(p.fixed||0)-Number(p.variable||0),fullMargin=fullSummary.total?fullReal/fullSummary.total*100:0;
+ const accruedLaborHours=scheduledHoursUntil(p.scheduleRows||[],date,hour),accruedLabor=accruedLaborHours*7,accruedFixed=Number(p.fixed||0)*operatingProgress;
+ const accruedReal=currentSummary.total-currentFin.cost-accruedLabor-accruedFixed-Number(p.variable||0),accruedMargin=currentSummary.total?accruedReal/currentSummary.total*100:0;
+ const historyTickets=(data.history?.tickets||[]).filter(t=>ticketDateKey(t)!==date),byDate=new Map();historyTickets.forEach(t=>{const k=ticketDateKey(t);if(!byDate.has(k))byDate.set(k,[]);byDate.get(k).push(t)});
+ const yesterday=addDays(date,-1),yesterdayNow=summarizeTicketRows(ticketsUntilHour(byDate.get(yesterday)||[],hour));
+ const recentDates=[...byDate.keys()].sort().reverse();
+ const avgAtHour=(days,filter=()=>true)=>{const selected=recentDates.filter(filter).slice(0,days).map(d=>summarizeTicketRows(ticketsUntilHour(byDate.get(d)||[],hour)).total);return selected.length?selected.reduce((a,b)=>a+b,0)/selected.length:0};
+ const avgWeek=avgAtHour(7),avgMonth=avgAtHour(30),weekday=new Date(date+'T12:00:00').getDay(),avgSameWeekday=avgAtHour(4,d=>new Date(d+'T12:00:00').getDay()===weekday);
+ const shift=currentShiftForHour(hour),shiftElapsedEnd=Math.min(hour,shift.end),shiftRows=currentTickets.filter(t=>{const h=decimalHour(t.hora||t.created_at);return h>=shift.start&&h<shift.end});
+ const shiftNow=summarizeTicketRows(shiftRows),historicShiftTotals=recentDates.slice(0,30).map(d=>summarizeTicketRows((byDate.get(d)||[]).filter(t=>{const h=decimalHour(t.hora||t.created_at);return h>=shift.start&&h<=shiftElapsedEnd})).total),shiftAvg=historicShiftTotals.length?historicShiftTotals.reduce((a,b)=>a+b,0)/historicShiftTotals.length:0;
+ const comparableFullShift=recentDates.slice(0,30).map(d=>summarizeTicketRows((byDate.get(d)||[]).filter(t=>{const h=decimalHour(t.hora||t.created_at);return h>=shift.start&&h<shift.end})).total),fullShiftAvg=comparableFullShift.length?comparableFullShift.reduce((a,b)=>a+b,0)/comparableFullShift.length:0;
+ const shiftProgress=Math.max(.08,Math.min(1,(hour-shift.start)/(shift.end-shift.start))),shiftForecast=hour>=shift.end?shiftNow.total:Math.max(shiftNow.total,shiftNow.total/shiftProgress*.55+fullShiftAvg*.45);
+ const dayProgress=Math.max(.08,operatingProgress),historicalFullDays=recentDates.slice(0,30).map(d=>summarizeTicketRows(byDate.get(d)||[]).total),avgFullDay=historicalFullDays.length?historicalFullDays.reduce((a,b)=>a+b,0)/historicalFullDays.length:0;
+ const dayForecast=Math.max(currentSummary.total,currentSummary.total/dayProgress*.45+avgFullDay*.55)+pending;
+ const rate=currentSummary.total/Math.max(1,hour-8),oldest=open.length?Math.max(...open.map(o=>minutesOpen(o.opened_at))):0,coverage=currentSummary.total?Math.max(0,100-currentFin.unknownRevenue/currentSummary.total*100):100;
+ const alerts=[];if(oldest>120)alerts.push(`Hay una cuenta abierta desde hace ${durationShort(oldest)}.`);if(currentFin.unknownRevenue>0)alerts.push(`${money(currentFin.unknownRevenue)} de ventas hasta ahora no tienen coste configurado.`);if(data.sync&&Number(data.sync.pending_tickets||0)>0)alerts.push(`${data.sync.pending_tickets} tickets pendientes de sincronizar.`);if(accruedReal<0&&currentSummary.total>0)alerts.push(`El resultado acumulado hasta esta hora es ${money(accruedReal)}.`);
+ const rhythm=comparisonPercent(currentSummary.total,avgMonth);const rhythmText=rhythm>=10?'Ritmo fuerte':rhythm>=-5?'Ritmo normal':'Ritmo por debajo de la media';
  return <div className="commandCenter">
-  <div className="commandHero"><div><span className="sectionEyebrow">COLIBRÍ 6.0 · CENTRO DE MANDO</span><h1>Negocio en directo</h1><p>Ventas, servicio, rentabilidad y sincronización en una única pantalla.</p></div><div className="commandLive"><b>● EN DIRECTO</b><span>{now.toLocaleTimeString('es-ES')}</span><button onClick={load}>{loading?'Actualizando...':'Actualizar ahora'}</button></div></div>
-  <div className="commandKpis"><div><span>Ventas hoy</span><b>{money(sales)}</b><small>{ticketCount} tickets</small></div><div><span>Beneficio estimado</span><b className={real>=0?'ok':'bad'}>{money(real)}</b><small>{margin.toFixed(1)}% de margen</small></div><div><span>Cuentas abiertas</span><b>{open.length}</b><small>{money(pending)} pendiente</small></div><div><span>Venta por hora</span><b>{money(rate)}</b><small>desde las 08:00</small></div><div><span>Previsión cierre</span><b>{money(forecast+pending)}</b><small>incluye cuentas abiertas</small></div><div><span>Sync</span><b>{Number(data.sync?.pending_tickets||0)===0?'OK':'REVISAR'}</b><small>{secondsAgo(data.sync?.updated_at)}</small></div></div>
-  <div className="commandGrid"><section className="card commandEconomy"><h2>Estado económico</h2><p><span>Ventas</span><b>{money(sales)}</b></p><p><span>Coste de producto</span><b>- {money(productCost)}</b></p><p><span>Personal según cuadrante</span><b>- {money(p.laborAccrued)}</b></p><p><span>Gastos fijos y variables</span><b>- {money(Number(p.fixed||0)+Number(p.variable||0))}</b></p><p className="total"><span>Beneficio real estimado</span><b className={real>=0?'ok':'bad'}>{money(real)}</b></p></section>
+  <div className="commandHero"><div><span className="sectionEyebrow">COLIBRÍ 6.1 · CENTRO DE MANDO</span><h1>Negocio en directo</h1><p>Lectura real hasta las {now.toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'})}, comparada con la misma hora histórica.</p></div><div className="commandLive"><b>● EN DIRECTO</b><span>{now.toLocaleTimeString('es-ES')}</span><button onClick={load}>{loading?'Actualizando...':'Actualizar ahora'}</button></div></div>
+  <div className="commandKpis"><div><span>Ventas hasta ahora</span><b>{money(currentSummary.total)}</b><small>{currentSummary.tickets} tickets</small></div><div><span>Resultado acumulado</span><b className={accruedReal>=0?'ok':'bad'}>{money(accruedReal)}</b><small>{accruedMargin.toFixed(1)}% · gastos imputados hasta ahora</small></div><div><span>Beneficio día completo</span><b className={fullReal>=0?'ok':'bad'}>{money(fullReal)}</b><small>Mismo cálculo que Rentabilidad</small></div><div><span>Cuentas abiertas</span><b>{open.length}</b><small>{money(pending)} pendiente</small></div><div><span>Previsión cierre</span><b>{money(dayForecast)}</b><small>hora actual + histórico + abiertas</small></div><div><span>Sync</span><b>{Number(data.sync?.pending_tickets||0)===0?'OK':'REVISAR'}</b><small>{secondsAgo(data.sync?.updated_at)}</small></div></div>
+  <section className="card commandNow"><div className="commandSectionHead"><div><span className="sectionEyebrow">CÓMO VOY AHORA</span><h2>{rhythmText}</h2><p>Comparación de ventas acumuladas exactamente hasta esta misma hora.</p></div><strong>{money(currentSummary.total)}</strong></div><div className="commandCompareGrid"><ComparisonMetric label="Ayer, misma hora" current={currentSummary.total} base={yesterdayNow.total}/><ComparisonMetric label="Media últimos 7 días" current={currentSummary.total} base={avgWeek}/><ComparisonMetric label="Media últimos 30 días" current={currentSummary.total} base={avgMonth}/><ComparisonMetric label="Mismo día de semana" current={currentSummary.total} base={avgSameWeekday}/></div></section>
+  <div className="commandGrid commandGrid61"><section className="card commandShift"><span className="sectionEyebrow">TURNO ACTUAL</span><h2>{shift.name}</h2><div className="commandShiftKpis"><p><span>Ventas del turno</span><b>{money(shiftNow.total)}</b></p><p><span>Media a esta hora</span><b>{money(shiftAvg)}</b></p><p><span>Previsión fin de turno</span><b>{money(shiftForecast)}</b></p><p><span>Tickets / medio</span><b>{shiftNow.tickets} · {money(shiftNow.ticketMean)}</b></p></div><div className={comparisonPercent(shiftNow.total,shiftAvg)>=0?'commandGood':'commandAlert'}>{comparisonPercent(shiftNow.total,shiftAvg)>=0?'✓':'⚠'} Vas {Math.abs(comparisonPercent(shiftNow.total,shiftAvg)).toFixed(1)}% {comparisonPercent(shiftNow.total,shiftAvg)>=0?'por encima':'por debajo'} de la media del turno a esta hora.</div></section>
+  <section className="card commandEconomy"><h2>Resultado hasta ahora</h2><p><span>Ventas cobradas</span><b>{money(currentSummary.total)}</b></p><p><span>Coste de producto</span><b>- {money(currentFin.cost)}</b></p><p><span>Personal transcurrido</span><b>- {money(accruedLabor)}</b></p><p><span>Gastos fijos imputados</span><b>- {money(accruedFixed)}</b></p><p><span>Variables registrados</span><b>- {money(p.variable)}</b></p><p className="total"><span>Resultado acumulado</span><b className={accruedReal>=0?'ok':'bad'}>{money(accruedReal)}</b></p></section>
+  <section className="card commandQuality"><h2>Calidad de datos</h2><div className="qualityGauge"><b>{coverage.toFixed(0)}%</b><span>cobertura de costes</span></div><p><span>Venta conocida</span><b>{money(currentSummary.total-currentFin.unknownRevenue)}</b></p><p><span>Pendiente de coste</span><b>{money(currentFin.unknownRevenue)}</b></p><p><span>Venta por hora</span><b>{money(rate)}</b></p></section></div>
   <section className="card commandAlerts"><h2>Radar de incidencias</h2>{alerts.length?alerts.map((a,i)=><div className="commandAlert" key={i}>⚠ {a}</div>):<div className="commandGood">✓ Servicio estable. No hay incidencias relevantes.</div>}</section>
-  <section className="card commandQuality"><h2>Calidad de datos</h2><div className="qualityGauge"><b>{coverage.toFixed(0)}%</b><span>cobertura de costes</span></div><p><span>Venta con coste conocido</span><b>{money(knownRevenue)}</b></p><p><span>Pendiente de coste</span><b>{money(unknownRevenue)}</b></p><p><span>Motor</span><b>{data.sync?'Conectado':'Sin datos'}</b></p></section></div>
   <EstadoServicio initialView={initialView} focusAccount={focusAccount}/>
  </div>
 }
