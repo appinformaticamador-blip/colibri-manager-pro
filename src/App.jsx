@@ -1062,77 +1062,79 @@ function dashboardRecommendation({projected,objective,barra,oldest,occTerrace,to
 }
 function Dashboard({onNavigate}){
  const[date,setDate]=useState(today());
- const[state,setState]=useState({tickets:[],lines:[],articles:new Map(),clock:[],sync:null,syncStatus:null,prev:null,avgSameDay:null,goal:null,service:{open:[],audit:[]},loading:true,error:null});
- useEffect(()=>{load();const t=setInterval(load,15000);return()=>clearInterval(t)},[date]);
- async function load(){
+ const[state,setState]=useState({tickets:[],lines:[],costMap:new Map(),clock:[],real:null,month:null,closure:null,prev:null,avgSameDay:0,goal:null,service:{open:[],audit:[]},loading:true,error:null});
+ useEffect(()=>{load();const t=setInterval(()=>{if(date===today())load(false)},30000);return()=>clearInterval(t)},[date]);
+ async function load(show=true){
   if(!supabase){setState(s=>({...s,error:'Supabase no configurado',loading:false}));return}
+  if(show)setState(s=>({...s,loading:true}));
   try{
-   const start=date+'T00:00:00';const end=addDays(date,1)+'T00:00:00';
-   const prevDate=addDays(date,-7);
+   const next=addDays(date,1),start=date+'T00:00:00',end=next+'T00:00:00';
+   const monthStart=date.slice(0,7)+'-01',monthEnd=addDays(date,1);
    const sameDays=[addDays(date,-7),addDays(date,-14),addDays(date,-21),addDays(date,-28)];
-   const [rangeData,clockRes,syncStatus,prevData,serviceData,...avgData]=await Promise.all([
-    loadSalesRange(date,addDays(date,1)),
-    supabase.from('clock_records').select('*').gte('created_at',start).lt('created_at',end).order('created_at',{ascending:false}).limit(500),
-    loadSyncStatus(),
-    loadSalesForDate(prevDate),
-    date===today()?loadServiceState():Promise.resolve({open:[],audit:[],status:null}),
+   const [rangeData,costMap,clockRes,prevData,serviceData,closure,...avgData]=await Promise.all([
+    loadSalesRange(date,next),loadProfitabilityCostMap(),
+    supabase.from('clock_records').select('*').gte('created_at',start).lt('created_at',end).order('created_at',{ascending:true}).limit(1000),
+    loadSalesForDate(addDays(date,-7)),date===today()?loadServiceState():Promise.resolve({open:[],audit:[],status:null}),loadCashClosure(date),
     ...sameDays.map(d=>loadSalesForDate(d))
    ]);
+   const clocks=clockRes.data||[];
+   const real=await loadRealProfitability(supabase,date,next,clocks);
+   const monthSales=await loadSalesRange(monthStart,monthEnd);
+   const monthClock=(await supabase.from('clock_records').select('*').gte('created_at',monthStart+'T00:00:00').lt('created_at',monthEnd+'T00:00:00').order('created_at',{ascending:true}).limit(10000)).data||[];
+   const monthReal=await loadRealProfitability(supabase,monthStart,monthEnd,monthClock);
+   const monthFin=periodFinancials(monthSales.lines||[],costMap);
+   const monthSummary=summarizeTickets(monthSales.tickets||[]);
+   const monthProfit=monthSummary.total-monthFin.cost-monthReal.laborAccrued-monthReal.fixed-monthReal.variable;
    const summary=summarizeTickets(rangeData.tickets||[]);
    const smart=await loadSmartGoal(date,summary.total);
    const avgTotals=avgData.map(x=>Number(x?.daily?.total||0)).filter(v=>v>0);
-   const avgSameDay=avgTotals.length?avgTotals.reduce((a,b)=>a+b,0)/avgTotals.length:0;
-   setState({tickets:rangeData.tickets||[],lines:rangeData.lines||[],articles:rangeData.articles||new Map(),clock:clockRes.data||[],sync:rangeData.sync||null,syncStatus,prev:prevData.daily||null,avgSameDay,goal:smart,service:serviceData||{open:[],audit:[]},loading:false,error:null});
+   setState({tickets:rangeData.tickets||[],lines:rangeData.lines||[],costMap,clock:clocks,real,month:{summary:monthSummary,fin:monthFin,real:monthReal,profit:monthProfit},closure,prev:prevData.daily||null,avgSameDay:avgTotals.length?avgTotals.reduce((a,b)=>a+b,0)/avgTotals.length:0,goal:smart,service:serviceData||{open:[],audit:[]},loading:false,error:null});
   }catch(e){setState(s=>({...s,loading:false,error:e.message||String(e)}))}
  }
- const summary=summarizeTickets(state.tickets);
- const working=workingFromClock(state.clock);
- const objective=Number(state.goal?.goal||750);
- const projected=Number(state.goal?.projected||summary.total);
- const vsPrev=pctDiff(summary.total,state.prev?.total);
- const open=state.service?.open||[];
- const terrace=open.filter(o=>o.zona==='terraza');
- const salon=open.filter(o=>o.zona==='salon');
- const barra=open.filter(o=>o.zona==='barra');
- const totalPending=open.reduce((a,o)=>a+Number(o.total||0),0);
- const oldest=open.length?Math.max(...open.map(o=>minutesOpen(o.opened_at))):0;
- const occTerrace=Math.round((terrace.length/15)*100);
- const occSalon=Math.round((salon.length/8)*100);
- const occTotal=Math.round(((terrace.length+salon.length)/23)*100);
- const business=dashboardStatus({summary,open,terrace,salon,barra,totalPending,oldest,occTerrace,occSalon});
- const index=colibriIndex({summary,totalPending,oldest,occTotal,alerts:business.alerts});
- const recommendation=dashboardRecommendation({projected,objective,barra,oldest,occTerrace,totalPending,summary});
- const recentOpen=open.slice().sort((a,b)=>new Date(b.opened_at)-new Date(a.opened_at)).slice(0,5);
- const latestTickets=(state.tickets||[]).slice().sort((a,b)=>new Date(b.hora||b.created_at)-new Date(a.hora||a.created_at)).slice(0,5);
- const activity=[...recentOpen.map((o,i)=>({time:o.opened_at,icon:'●',text:`${accountLabel(o,i)} abierta`,amount:money(o.total),target:{tab:'servicio',section:o.zona==='barra'?'barra':'lista',payload:{cab_id:o.cab_id,mesa_numero:o.mesa_numero}}})),...latestTickets.map(t=>({time:t.hora||t.created_at,icon:'✓',text:`Ticket ${t.numdoc||t.cab_id||''} cobrado`,amount:money(t.total),target:{tab:'tpv'}}))].sort((a,b)=>new Date(b.time)-new Date(a.time)).slice(0,6);
+ const summary=summarizeTickets(state.tickets),productFin=periodFinancials(state.lines,state.costMap),real=state.real||{fixed:0,variable:0,laborAccrued:0,hours:0};
+ const gross=summary.total-productFin.cost,realProfit=gross-real.laborAccrued-real.fixed-real.variable,realMargin=summary.total?realProfit/summary.total*100:0;
+ const objective=Number(state.goal?.goal||750),goalPct=objective?Math.min(100,summary.total/objective*100):0,vsPrev=pctDiff(summary.total,state.prev?.total),vsAvg=pctDiff(summary.total,state.avgSameDay);
+ const open=state.service?.open||[],terrace=open.filter(o=>o.zona==='terraza'),salon=open.filter(o=>o.zona==='salon'),barra=open.filter(o=>o.zona==='barra');
+ const totalPending=open.reduce((a,o)=>a+Number(o.total||0),0),oldest=open.length?Math.max(...open.map(o=>minutesOpen(o.opened_at))):0;
+ const occTerrace=Math.round(terrace.length/15*100),occSalon=Math.round(salon.length/8*100);
+ const laborPct=summary.total?real.laborAccrued/summary.total*100:0,productPct=summary.total?productFin.cost/summary.total*100:0;
+ const missingCost=Number(productFin.unknownRevenue||0);
+ const alerts=[];
+ if(missingCost>0)alerts.push({tone:'warning',icon:'⚠️',title:'Costes pendientes',text:`Hay ${money(missingCost)} en ventas de productos sin coste configurado.`,tab:'rentabilidad'});
+ if(date<today()&&!state.closure)alerts.push({tone:'warning',icon:'🧾',title:'Cierre pendiente',text:`No hay cierre de caja guardado para ${fmtDate(date)}.`,tab:'tpv'});
+ if(laborPct>35)alerts.push({tone:'critical',icon:'👥',title:'Personal elevado',text:`El personal estimado representa el ${laborPct.toFixed(1)}% de las ventas.`,tab:'inteligencia'});
+ if(realProfit<0&&summary.total>0)alerts.push({tone:'critical',icon:'📉',title:'Día en pérdidas',text:`El resultado real estimado es ${money(realProfit)}.`,tab:'inteligencia'});
+ if(oldest>=75)alerts.push({tone:'warning',icon:'⏱️',title:'Cuenta antigua',text:`La cuenta más antigua lleva ${durationShort(oldest)} abierta.`,tab:'servicio'});
+ if(!alerts.length)alerts.push({tone:'ok',icon:'✅',title:'Sin incidencias relevantes',text:'Ventas, costes y operativa están dentro de los parámetros actuales.',tab:'inteligencia'});
+ const daysElapsed=Math.max(1,new Date(date+'T12:00:00').getDate()),daysMonth=new Date(new Date(date+'T12:00:00').getFullYear(),new Date(date+'T12:00:00').getMonth()+1,0).getDate();
+ const monthProjection=state.month?state.month.profit/daysElapsed*daysMonth:0;
+ const topProduct=productRank(state.lines,'qty',new Map())[0];
  const go=(tab,section=null,payload=null)=>onNavigate?.(tab,section,payload);
- const keyGo=(e,tab,section=null,payload=null)=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();go(tab,section,payload)}};
- const indexLabel=index>=90?'Excelente':index>=75?'Bien':index>=55?'Vigilancia':'Atención';
- return <div className="executiveDashboard">
-  <div className={'executiveHero '+business.tone}>
-   <div><span className="pill">Colibrí ERP PRO · Dashboard Ejecutivo</span><h1>{getGreeting()}, Alfonso</h1><p>{fmtDate(date)} · Resumen del negocio de un vistazo</p></div>
-   <div className="businessStatus"><b>{business.tone==='critical'?'🔴':business.tone==='warning'?'🟠':'🟢'} {business.label}</b><span>{business.message}</span><small>Actualizado {secondsAgo(state.service?.status?.updated_at||state.syncStatus?.updated_at||state.sync?.synced_at)}</small></div>
-  </div>
+ const kpi=(cls,label,value,sub,tab)=><button className={'dash5Kpi '+cls} onClick={()=>go(tab)}><span>{label}</span><b>{value}</b><small>{sub}</small></button>;
+ return <div className="dashboard5">
+  <section className="dash5Hero"><div><span>COLIBRÍ 5.0 · DIRECCIÓN DEL NEGOCIO</span><h1>{getGreeting()}, Alfonso</h1><p>{fmtDate(date)} · Resultado real y estado operativo</p></div><div className="dash5Date"><input type="date" value={date} onChange={e=>setDate(e.target.value)}/><button onClick={()=>load()}>{state.loading?'Actualizando…':'Actualizar'}</button></div></section>
   {state.error&&<div className="card error">{state.error}</div>}
-  <div className="executiveKpis">
-   <div className="execKpi sales dashboardLink" role="button" tabIndex="0" onClick={()=>go('tpv')} onKeyDown={e=>keyGo(e,'tpv')}><span>Ventas hoy</span><b>{money(summary.total)}</b><em>{formatPct(vsPrev)} vs sábado/semana anterior</em><small>Ver TPV →</small></div>
-   <div className="execKpi pending dashboardLink" role="button" tabIndex="0" onClick={()=>go('servicio','lista')} onKeyDown={e=>keyGo(e,'servicio','lista')}><span>Pendiente de cobro</span><b>{money(totalPending)}</b><em>{open.length} cuentas abiertas</em><small>Ver cuentas →</small></div>
-   <div className="execKpi accounts dashboardLink" role="button" tabIndex="0" onClick={()=>go('servicio','lista')} onKeyDown={e=>keyGo(e,'servicio','lista')}><span>Cuentas activas</span><b>{open.length}</b><em>{terrace.length} terraza · {salon.length} salón · {barra.length} barra</em><small>Ver listado →</small></div>
-   <div className="execKpi occupancy dashboardLink" role="button" tabIndex="0" onClick={()=>go('servicio','plano')} onKeyDown={e=>keyGo(e,'servicio','plano')}><span>Ocupación mesas</span><b>{occTotal}%</b><em>Terraza {occTerrace}% · Salón {occSalon}%</em><small>Ver plano →</small></div>
-  </div>
-  <div className="executiveColumns">
-   <div className="card attentionCenter dashboardLink" role="button" tabIndex="0" onClick={()=>go('servicio','lista')} onKeyDown={e=>keyGo(e,'servicio','lista')}><div className="row between"><h2>⚠ Centro de atención</h2><span className="attentionCount">{business.alerts.filter(a=>a.level!=='positive').length}</span></div>{business.alerts.map((a,i)=><div className={'attentionItem '+a.level} key={i}><span>{a.icon}</span><div><b>{a.title}</b><p>{a.text}</p></div></div>)}</div>
-   <div className="card colibriScore dashboardLink" role="button" tabIndex="0" onClick={()=>go('inteligencia')} onKeyDown={e=>keyGo(e,'inteligencia')}><h2>Índice Colibrí</h2><div className={'scoreCircle '+(index>=90?'excellent':index>=75?'good':index>=55?'watch':'risk')}><b>{index}</b><span>/100</span></div><h3>{indexLabel}</h3><p>Resume ventas, ocupación, antigüedad de cuentas y alertas operativas.</p></div>
-   <div className="card aiExecutive dashboardLink" role="button" tabIndex="0" onClick={()=>go('inteligencia')} onKeyDown={e=>keyGo(e,'inteligencia')}><h2>💡 Recomendación</h2><p>{recommendation}</p><div className="forecastLine"><span>Previsión de cierre</span><b>{money(projected)}</b></div><div className="forecastLine"><span>Objetivo inteligente</span><b>{money(objective)}</b></div></div>
-  </div>
-  <div className="executiveColumns lower">
-   <div className="card zoneSnapshot dashboardLink" role="button" tabIndex="0" onClick={()=>go('servicio','plano')} onKeyDown={e=>keyGo(e,'servicio','plano')}><h2>Estado por zonas</h2><div className="zoneRow"><span>Terraza</span><b>{terrace.length}/15</b><em>{occTerrace}%</em></div><OccupancyBar value={occTerrace}/><div className="zoneRow"><span>Salón</span><b>{salon.length}/8</b><em>{occSalon}%</em></div><OccupancyBar value={occSalon}/><div className="zoneRow"><span>Barra</span><b>{barra.length} cuentas</b><em>{money(barra.reduce((a,o)=>a+Number(o.total||0),0))}</em></div></div>
-   <div className="card daySummary"><h2>Resumen del día</h2><div className="summaryTiles"><div className="dashboardLink" role="button" tabIndex="0" onClick={()=>go('tpv')}><span>Tickets</span><b>{summary.tickets}</b></div><div className="dashboardLink" role="button" tabIndex="0" onClick={()=>go('tpv')}><span>Ticket medio</span><b>{money(summary.ticket_medio)}</b></div><div className="dashboardLink" role="button" tabIndex="0" onClick={()=>go('fichajes')}><span>Personal ahora</span><b>{working.length}</b></div><div className="dashboardLink" role="button" tabIndex="0" onClick={()=>go('servicio','lista')}><span>Cuenta más antigua</span><b>{durationShort(oldest)}</b></div></div></div>
-   <div className="card activityExecutive"><h2>Actividad reciente</h2>{activity.length?activity.map((e,i)=><button type="button" className="activityExecutiveRow dashboardActivityLink" key={i} onClick={()=>go(e.target.tab,e.target.section,e.target.payload)}><span>{safeHour(e.time)}</span><b>{e.icon} {e.text}</b><em>{e.amount}</em><i>›</i></button>):<p>No hay actividad reciente.</p>}</div>
-  </div>
-  <nav className="dashboardQuickActions" aria-label="Acciones rápidas"><button onClick={()=>go('servicio','plano')}><span>▦</span>Plano</button><button onClick={()=>go('servicio','barra')}><span>▰</span>Barra</button><button onClick={()=>go('tpv')}><span>€</span>TPV</button><button onClick={()=>go('cuadrantes')}><span>▦</span>Cuadrantes</button><button onClick={()=>go('inteligencia')}><span>✦</span>IA</button></nav>
- </div>}
-
+  <section className="dash5Kpis">
+   {kpi('sales','Ventas',money(summary.total),`${formatPct(vsPrev)} vs mismo día anterior`,'tpv')}
+   {kpi(realProfit>=0?'profit':'loss','Beneficio real estimado',money(realProfit),`${realMargin.toFixed(1)}% de margen real`,'inteligencia')}
+   {kpi('margin','Margen bruto',money(gross),`${productPct.toFixed(1)}% coste de producto`,'rentabilidad')}
+   {kpi('goal','Objetivo diario',`${goalPct.toFixed(0)}%`,`${money(summary.total)} de ${money(objective)}`,'inteligencia')}
+  </section>
+  <div className="dash5Goal"><div><span>Progreso del objetivo</span><b>{money(Math.max(0,objective-summary.total))} para alcanzarlo</b></div><div className="dash5GoalTrack"><i style={{width:`${goalPct}%`}}/></div><small>Vs media de cuatro semanas: <b className={(vsAvg||0)>=0?'ok':'bad'}>{formatPct(vsAvg)}</b></small></div>
+  <section className="dash5Grid">
+   <article className="card dash5Result"><div className="dash5Title"><div><span>RESULTADO REAL DE HOY</span><h2>Cuenta de resultados</h2></div><button onClick={()=>go('rentabilidad')}>Ver rentabilidad</button></div>
+    <div className="dash5ResultRows"><p><span>Ventas</span><b>{money(summary.total)}</b></p><p><span>Coste de productos</span><b>- {money(productFin.cost)}</b></p><p><span>Margen bruto</span><b>{money(gross)}</b></p><p><span>Personal estimado ({Number(real.hours||0).toFixed(1)} h × 7 €)</span><b>- {money(real.laborAccrued)}</b></p><p><span>Gastos fijos imputados</span><b>- {money(real.fixed)}</b></p><p><span>Gastos variables</span><b>- {money(real.variable)}</b></p><p className="total"><span>Beneficio real estimado</span><b className={realProfit>=0?'ok':'bad'}>{money(realProfit)}</b></p></div>
+   </article>
+   <article className="card dash5Alerts"><div className="dash5Title"><div><span>ATENCIÓN HOY</span><h2>{alerts.length===1&&alerts[0].tone==='ok'?'Todo controlado':`${alerts.length} asuntos a revisar`}</h2></div></div>{alerts.slice(0,5).map((a,i)=><button className={'dash5Alert '+a.tone} key={i} onClick={()=>go(a.tab)}><span>{a.icon}</span><div><b>{a.title}</b><p>{a.text}</p></div><i>›</i></button>)}</article>
+  </section>
+  <section className="dash5Grid three">
+   <article className="card dash5Service" onClick={()=>go('servicio','plano')}><div className="dash5Title"><div><span>SERVICIO AHORA</span><h2>Estado operativo</h2></div></div><div className="dash5MiniGrid"><div><span>Mesas abiertas</span><b>{terrace.length+salon.length}</b></div><div><span>Barra</span><b>{barra.length}</b></div><div><span>Pendiente</span><b>{money(totalPending)}</b></div><div><span>Más antigua</span><b>{durationShort(oldest)}</b></div></div><p>Terraza {terrace.length}/15 · Salón {salon.length}/8 · Barra {barra.length} cuentas</p></article>
+   <article className="card dash5Summary" onClick={()=>go('tpv')}><div className="dash5Title"><div><span>RESUMEN DEL DÍA</span><h2>Ventas y clientes</h2></div></div><div className="dash5MiniGrid"><div><span>Tickets</span><b>{summary.tickets}</b></div><div><span>Ticket medio</span><b>{money(summary.ticket_medio)}</b></div><div><span>Producto líder</span><b>{topProduct?.name||'—'}</b></div><div><span>Cierre</span><b>{state.closure?'Realizado':'Pendiente'}</b></div></div></article>
+   <article className="card dash5Month" onClick={()=>go('inteligencia')}><div className="dash5Title"><div><span>PREVISIÓN DEL MES</span><h2>Beneficio proyectado</h2></div></div><b className={monthProjection>=0?'ok':'bad'}>{money(monthProjection)}</b><p>Resultado acumulado: <strong>{money(state.month?.profit||0)}</strong></p><p>Ventas acumuladas: <strong>{money(state.month?.summary?.total||0)}</strong></p><small>Proyección basada en el ritmo real del mes, incluidos productos, personal y gastos.</small></article>
+  </section>
+  <nav className="dashboardQuickActions"><button onClick={()=>go('servicio','plano')}><span>▦</span>Servicio</button><button onClick={()=>go('tpv')}><span>€</span>TPV</button><button onClick={()=>go('inteligencia')}><span>✦</span>Inteligencia</button><button onClick={()=>go('rentabilidad')}><span>↗</span>Rentabilidad</button><button onClick={()=>go('cuadrantes')}><span>▦</span>Cuadrantes</button></nav>
+ </div>
+}
 function Employees(){const[employees,setEmployees]=useState([]);const[name,setName]=useState('');const[pin,setPin]=useState('');useEffect(()=>{load()},[]);async function load(){if(!supabase)return;const{data}=await supabase.from('employees').select('*').order('name');setEmployees(data||[])}async function add(){if(!name||!pin)return alert('Nombre y PIN');const color=EMP_COLORS[employees.length%EMP_COLORS.length];const{error}=await supabase.from('employees').insert({name,pin,role:'empleado',color,can_clock:true,active:true});if(error)alert(error.message);setName('');setPin('');load()}async function update(e,patch){const{error}=await supabase.from('employees').update(patch).eq('id',e.id);if(error)alert(error.message);load()}return <div className="card"><h2>Empleados</h2><div className="row"><input placeholder="Nuevo empleado" value={name} onChange={e=>setName(e.target.value)}/><input placeholder="PIN" value={pin} onChange={e=>setPin(e.target.value)}/><button onClick={add}>Añadir</button></div>{employees.map(e=><div className="employee" key={e.id}><span className="sq" style={{background:e.color}}></span><b>{e.name}</b><span>{e.active?'Activo':'Inactivo'}</span><input placeholder="Nuevo PIN" onBlur={ev=>ev.target.value&&update(e,{pin:ev.target.value})}/><button onClick={()=>update(e,{active:!e.active})}>{e.active?'Desactivar':'Activar'}</button></div>)}</div>}
 function clockMinutesText(minutes){const m=Math.max(0,Math.round(Number(minutes||0)));return `${Math.floor(m/60)}h ${String(m%60).padStart(2,'0')}m`}
 function mondayISO(date=new Date()){const d=new Date(date);d.setHours(12,0,0,0);const day=(d.getDay()+6)%7;d.setDate(d.getDate()-day);return d.toISOString().slice(0,10)}
