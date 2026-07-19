@@ -523,6 +523,47 @@ function EstadoServicio({initialView='plano',focusAccount=null}){
  <TicketModal cabId={selected?.cab_id} account={selected} onClose={()=>setSelected(null)}/></div>
 }
 
+
+function CommandCenter({initialView='plano',focusAccount=null}){
+ const[data,setData]=useState({sales:null,service:null,profit:null,lines:[],costs:new Map(),sync:null});
+ const[loading,setLoading]=useState(false);const[now,setNow]=useState(new Date());
+ async function load(){
+  setLoading(true);
+  const date=today(),to=addDays(date,1);
+  const [sales,service,profit,sync]=await Promise.all([loadSalesForDate(date),loadServiceState(),loadRealProfitability(supabase,date,to,[]),loadSyncStatus()]);
+  let lines=[],costs=new Map();
+  if(supabase&&sales.tickets?.length){
+   const ids=sales.tickets.map(t=>t.cab_id).filter(Boolean);
+   for(let i=0;i<ids.length;i+=200){const {data:part}=await supabase.from('numier_ticket_lines').select('cab_id,articulo,descripcion,cantidad,importe').in('cab_id',ids.slice(i,i+200)).limit(10000);lines=lines.concat(part||[])}
+   const {data:c}=await supabase.from('profitability_article_costs').select('article_code,manual_unit_cost,excluded_from_margin').limit(20000);
+   costs=new Map((c||[]).map(x=>[String(x.article_code),x]));
+  }
+  setData({sales,service,profit,lines,costs,sync});setNow(new Date());setLoading(false);
+ }
+ useEffect(()=>{load();const t=setInterval(load,30000);return()=>clearInterval(t)},[]);
+ const tickets=data.sales?.tickets||[],open=data.service?.open||[],daily=data.sales?.daily||{};
+ const pending=open.reduce((a,x)=>a+Number(x.total||0),0),sales=Number(daily.total||0),ticketCount=Number(daily.tickets||tickets.length||0);
+ let productCost=0,knownRevenue=0,unknownRevenue=0;
+ data.lines.forEach(l=>{const qty=Math.abs(Number(l.cantidad||0)),rev=Math.abs(Number(l.importe||0)),c=data.costs.get(String(l.articulo||''));if(c&&!c.excluded_from_margin&&Number.isFinite(Number(c.manual_unit_cost))){productCost+=qty*Number(c.manual_unit_cost);knownRevenue+=rev}else unknownRevenue+=rev});
+ const p=data.profit||{},gross=sales-productCost,real=gross-Number(p.laborAccrued||0)-Number(p.fixed||0)-Number(p.variable||0),margin=sales?real/sales*100:0;
+ const hour=now.getHours()+now.getMinutes()/60,elapsed=Math.max(1,hour-8),rate=sales/elapsed,forecast=hour<23.5?sales+rate*Math.max(0,23.5-hour):sales;
+ const oldest=open.length?Math.max(...open.map(o=>minutesOpen(o.opened_at))):0;
+ const alerts=[];
+ if(oldest>120)alerts.push(`Hay una cuenta abierta desde hace ${durationShort(oldest)}.`);
+ if(unknownRevenue>0)alerts.push(`${money(unknownRevenue)} de ventas aún no tienen coste configurado.`);
+ if(data.sync&&Number(data.sync.pending_tickets||0)>0)alerts.push(`${data.sync.pending_tickets} tickets pendientes de sincronizar.`);
+ if(real<0&&sales>0)alerts.push('El beneficio real estimado del día es negativo.');
+ const coverage=sales?Math.max(0,100-unknownRevenue/sales*100):100;
+ return <div className="commandCenter">
+  <div className="commandHero"><div><span className="sectionEyebrow">COLIBRÍ 6.0 · CENTRO DE MANDO</span><h1>Negocio en directo</h1><p>Ventas, servicio, rentabilidad y sincronización en una única pantalla.</p></div><div className="commandLive"><b>● EN DIRECTO</b><span>{now.toLocaleTimeString('es-ES')}</span><button onClick={load}>{loading?'Actualizando...':'Actualizar ahora'}</button></div></div>
+  <div className="commandKpis"><div><span>Ventas hoy</span><b>{money(sales)}</b><small>{ticketCount} tickets</small></div><div><span>Beneficio estimado</span><b className={real>=0?'ok':'bad'}>{money(real)}</b><small>{margin.toFixed(1)}% de margen</small></div><div><span>Cuentas abiertas</span><b>{open.length}</b><small>{money(pending)} pendiente</small></div><div><span>Venta por hora</span><b>{money(rate)}</b><small>desde las 08:00</small></div><div><span>Previsión cierre</span><b>{money(forecast+pending)}</b><small>incluye cuentas abiertas</small></div><div><span>Sync</span><b>{Number(data.sync?.pending_tickets||0)===0?'OK':'REVISAR'}</b><small>{secondsAgo(data.sync?.updated_at)}</small></div></div>
+  <div className="commandGrid"><section className="card commandEconomy"><h2>Estado económico</h2><p><span>Ventas</span><b>{money(sales)}</b></p><p><span>Coste de producto</span><b>- {money(productCost)}</b></p><p><span>Personal según cuadrante</span><b>- {money(p.laborAccrued)}</b></p><p><span>Gastos fijos y variables</span><b>- {money(Number(p.fixed||0)+Number(p.variable||0))}</b></p><p className="total"><span>Beneficio real estimado</span><b className={real>=0?'ok':'bad'}>{money(real)}</b></p></section>
+  <section className="card commandAlerts"><h2>Radar de incidencias</h2>{alerts.length?alerts.map((a,i)=><div className="commandAlert" key={i}>⚠ {a}</div>):<div className="commandGood">✓ Servicio estable. No hay incidencias relevantes.</div>}</section>
+  <section className="card commandQuality"><h2>Calidad de datos</h2><div className="qualityGauge"><b>{coverage.toFixed(0)}%</b><span>cobertura de costes</span></div><p><span>Venta con coste conocido</span><b>{money(knownRevenue)}</b></p><p><span>Pendiente de coste</span><b>{money(unknownRevenue)}</b></p><p><span>Motor</span><b>{data.sync?'Conectado':'Sin datos'}</b></p></section></div>
+  <EstadoServicio initialView={initialView} focusAccount={focusAccount}/>
+ </div>
+}
+
 function DailyReport({summary,lines,tickets,clockRows,period,costMap,articles}){
  const rankedQty=productRank(lines,'qty',articles);const rankedMoney=productRank(lines,'total',articles);const topQty=rankedQty[0];const topMoney=rankedMoney[0];const fin=periodFinancials(lines,costMap);const productCost=fin.cost;const grossProfit=summary.total-productCost;const margin=summary.total?(grossProfit/summary.total)*100:0;
  const byShift=SHIFT_DEFS.map(s=>{const rows=(tickets||[]).filter(t=>shiftForTicket(t)===s.id);return {...s,total:rows.reduce((a,t)=>a+Number(t.total||0),0),count:rows.length}}).sort((a,b)=>b.total-a.total);const bestShift=byShift[0];
@@ -1028,11 +1069,11 @@ function Brand(){return <div className="brand"><div className="brandMark"><img s
 function Manager(){
  const initial=history.state?.colibriRoute||{tab:'dashboard',section:null,payload:null};
  const[route,setRoute]=useState(initial);
- const tabs=[['dashboard','⌂','Dashboard'],['servicio','◉','Servicio'],['inteligencia','✦','Inteligencia'],['tpv','▣','TPV'],['gestoria','▤','Gestoría'],['rentabilidad','€','Rentabilidad'],['empleados','♟','Empleados'],['fichajes','◷','Fichajes'],['cuadrantes','▦','Cuadrantes'],['comparador','⇄','Comparador'],['config','⚙','Configuración']];
+ const tabs=[['dashboard','⌂','Dashboard'],['servicio','◉','Centro mando'],['inteligencia','✦','Inteligencia'],['tpv','▣','TPV'],['gestoria','▤','Gestoría'],['rentabilidad','€','Rentabilidad'],['empleados','♟','Empleados'],['fichajes','◷','Fichajes'],['cuadrantes','▦','Cuadrantes'],['comparador','⇄','Comparador'],['config','⚙','Configuración']];
  useEffect(()=>{const onPop=e=>setRoute(e.state?.colibriRoute||{tab:'dashboard',section:null,payload:null});addEventListener('popstate',onPop);return()=>removeEventListener('popstate',onPop)},[]);
  function navigate(tab,section=null,payload=null,{replace=false}={}){const next={tab,section,payload};setRoute(next);const fn=replace?'replaceState':'pushState';history[fn]({...(history.state||{}),colibriRoute:next},'',location.href);requestAnimationFrame(()=>scrollTo({top:0,behavior:'smooth'}));}
  const tab=route.tab;
- return <div className="erpShell"><aside className="erpSidebar"><Brand/><nav className="sideNav">{tabs.map(([id,icon,label])=><button className={tab===id?'active':''} onClick={()=>navigate(id)} key={id}><span>{icon}</span><b>{label}</b></button>)}</nav><div className="sidebarFooter"><div className="userAvatar">A</div><div><b>Alfonso</b><small>Gerencia</small></div></div></aside><main className="erpMain"><div className="mobileTop"><Brand/></div><section className="page"><ModuleErrorBoundary key={`${tab}-${route.section||''}-${JSON.stringify(route.payload||{})}`} name={tab}>{tab==='dashboard'&&<Dashboard onNavigate={navigate}/>} {tab==='servicio'&&<EstadoServicio initialView={route.section||'plano'} focusAccount={route.payload}/>} {tab==='inteligencia'&&<BusinessIntelligence/>}{tab==='empleados'&&<Employees/>}{tab==='fichajes'&&<ClockPanel/>}{tab==='cuadrantes'&&<Schedule/>}{tab==='comparador'&&<Compare/>}{tab==='tpv'&&<TPV/>}{tab==='gestoria'&&<Gestoria/>}{tab==='rentabilidad'&&<Profitability/>}{tab==='config'&&<Settings/>}</ModuleErrorBoundary></section></main></div>}
+ return <div className="erpShell"><aside className="erpSidebar"><Brand/><nav className="sideNav">{tabs.map(([id,icon,label])=><button className={tab===id?'active':''} onClick={()=>navigate(id)} key={id}><span>{icon}</span><b>{label}</b></button>)}</nav><div className="sidebarFooter"><div className="userAvatar">A</div><div><b>Alfonso</b><small>Gerencia</small></div></div></aside><main className="erpMain"><div className="mobileTop"><Brand/></div><section className="page"><ModuleErrorBoundary key={`${tab}-${route.section||''}-${JSON.stringify(route.payload||{})}`} name={tab}>{tab==='dashboard'&&<Dashboard onNavigate={navigate}/>} {tab==='servicio'&&<CommandCenter initialView={route.section||'plano'} focusAccount={route.payload}/>} {tab==='inteligencia'&&<BusinessIntelligence/>}{tab==='empleados'&&<Employees/>}{tab==='fichajes'&&<ClockPanel/>}{tab==='cuadrantes'&&<Schedule/>}{tab==='comparador'&&<Compare/>}{tab==='tpv'&&<TPV/>}{tab==='gestoria'&&<Gestoria/>}{tab==='rentabilidad'&&<Profitability/>}{tab==='config'&&<Settings/>}</ModuleErrorBoundary></section></main></div>}
 
 function getGreeting(){const h=new Date().getHours();if(h<12)return 'Buenos días';if(h<20)return 'Buenas tardes';return 'Buenas noches'}
 function pctDiff(a,b){a=Number(a||0);b=Number(b||0);if(!b)return null;return ((a-b)/b)*100}
