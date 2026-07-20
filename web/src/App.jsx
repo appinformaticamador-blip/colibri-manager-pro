@@ -305,16 +305,27 @@ function ivaSummary(lines){
  const m={};(lines||[]).forEach(l=>{const iva=Number(l.iva||0);const total=Number(l.importe||0);const base=iva>0?total/(1+iva/100):total;const cuota=total-base;const k=String(iva);m[k]=m[k]||{iva,base:0,cuota:0,total:0};m[k].base+=base;m[k].cuota+=cuota;m[k].total+=total;});
  return Object.values(m).sort((a,b)=>a.iva-b.iva);
 }
-function expectedStartMapToday(){
- try{const data=JSON.parse(localStorage.colibriSchedule||'{}');const day=DAYS[(new Date().getDay()+6)%7];const res={};Object.entries(data).forEach(([k,arr])=>{const parts=k.split('|');if(parts[1]!==day)return;const start=parts[2]?.split('-')[0];(arr||[]).forEach(e=>{if(!res[e.name]||start<res[e.name])res[e.name]=start;});});return res;}catch{return {}}
+function clockPersonKey(value){return String(value||'').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'')}
+function clockWeekId(value){const d=new Date(value);const y=d.getFullYear();const onejan=new Date(y,0,1);return `${y}-W${String(Math.ceil((((d-onejan)/86400000)+onejan.getDay()+1)/7)).padStart(2,'0')}`}
+function clockDayName(value){const d=new Date(value);return DAYS[(d.getDay()+6)%7]}
+function scheduleAssignmentFor(row,scheduleWeeks){
+ const weekId=clockWeekId(row.created_at);const schedule=scheduleWeeks?.[weekId];if(!schedule)return null;
+ const day=clockDayName(row.created_at);const data=schedule.data||{};const employeeId=clockPersonKey(row.employee_id);const employeeName=clockPersonKey(row.employee_name);
+ const employee=(schedule.employees||[]).find(e=>clockPersonKey(e.id)===employeeId||clockPersonKey(e.name)===employeeName||clockPersonKey(e.name)===employeeId);
+ const keys=new Set([employeeId,employeeName,clockPersonKey(employee?.id),clockPersonKey(employee?.name)].filter(Boolean));
+ const slots=SLOTS.filter(slot=>{const ids=data?.[day]?.[slot]||[];return ids.some(id=>keys.has(clockPersonKey(id)))});
+ if(!slots.length)return null;
+ const first=slots[0],last=slots[slots.length-1];const start=first.split('-')[0];const end=last.split('-')[1];
+ return {weekId,day,slots,start,end,label:`${start}-${end}`};
 }
-function punctualityFor(row,expected){
- if(String(row.type).toLowerCase()==='salida')return {label:'Salida',cls:'exit',icon:'🔴'};
- const st=expected?.[row.employee_name];if(!st)return {label:'Sin turno',cls:'neutral',icon:'⚪'};
- const d=new Date(row.created_at);const [h,m]=st.split(':').map(Number);const exp=new Date(d);exp.setHours(h,m,0,0);const diff=Math.round((d-exp)/60000);
- if(diff>10)return {label:`+${diff} min`,cls:'late10',icon:'⚠️'};
- if(diff>5)return {label:`+${diff} min`,cls:'late5',icon:'🟡'};
- return {label:diff>0?`+${diff} min`:'Puntual',cls:'ok',icon:'🟢'};
+function punctualityFor(row,assignment){
+ if(String(row.type).toLowerCase()==='salida')return {label:assignment?`Salida · ${assignment.label}`:'Salida',cls:'exit',icon:'🔴'};
+ if(!assignment)return {label:'Sin turno asignado',cls:'neutral',icon:'⚪'};
+ const d=new Date(row.created_at);const [h,m]=assignment.start.split(':').map(Number);const exp=new Date(d);exp.setHours(h,m,0,0);const diff=Math.round((d-exp)/60000);
+ if(diff>10)return {label:`${assignment.label} · +${diff} min`,cls:'late10',icon:'⚠️'};
+ if(diff>5)return {label:`${assignment.label} · +${diff} min`,cls:'late5',icon:'🟡'};
+ if(diff<-10)return {label:`${assignment.label} · ${Math.abs(diff)} min antes`,cls:'early',icon:'🔵'};
+ return {label:`${assignment.label} · ${diff>0?`+${diff} min`:'Puntual'}`,cls:'ok',icon:'🟢'};
 }
 
 function summarizeTickets(tickets){
@@ -1198,8 +1209,43 @@ function ClockPage(){
  {tab==='perfil'&&<><div className="employeeCard profileCard"><div className="profileAvatar">{user.name?.[0]||'E'}</div><h2>{user.name}</h2><p>Empleado activo · Acceso personal</p><button onClick={notifications}>Activar notificaciones</button></div><div className="employeeCard"><h2>Cambiar mi PIN</h2><p>El PIN debe ser personal. Gerencia siempre podrá verlo, restablecerlo o bloquear tu acceso.</p><label>PIN actual<input type="password" inputMode="numeric" value={oldPin} onChange={e=>setOldPin(e.target.value)}/></label><label>Nuevo PIN<input type="password" inputMode="numeric" value={newPin} onChange={e=>setNewPin(e.target.value)}/></label><button className="employeePrimary" onClick={changePin}>Guardar nuevo PIN</button></div><div className="employeeCard"><h2>Mis solicitudes</h2>{requests.length===0?<p>No tienes solicitudes registradas.</p>:requests.map(r=><div className="requestRow" key={r.id}><span><b>{r.request_type==='salida_olvidada'?'Salida olvidada':'Corrección'}</b><small>{new Date(r.proposed_at||r.created_at).toLocaleString('es-ES')}</small></span><em className={r.status}>{r.status}</em></div>)}</div></>}
  </section>{requestOpen&&<div className="employeeModal"><div><button className="modalClose" onClick={()=>setRequestOpen(false)}>×</button><span className="welcomePill">Solicitud a gerencia</span><h2>Olvidé fichar la salida</h2><p>No pasa nada. Indica la hora real y cuéntanos qué ocurrió. No sumará hasta que gerencia la apruebe.</p><label>Hora aproximada<input type="time" value={requestTime} onChange={e=>setRequestTime(e.target.value)}/></label><label>Motivo<textarea value={requestReason} onChange={e=>setRequestReason(e.target.value)} placeholder="Ej.: Se me olvidó fichar al terminar de cerrar la caja."/></label><button className="employeePrimary" onClick={submitRequest}>Enviar para revisión</button></div></div>}</main>
 }
-function ClockPanel(){const[rows,setRows]=useState([]);const[open,setOpen]=useState([]);useEffect(()=>{load()},[]);async function load(){if(!supabase)return;const{data,error}=await supabase.from('clock_records').select('*').order('created_at',{ascending:false}).limit(500);if(error){alert(error.message);return}const list=data||[];setRows(list);const latest=new Map();list.forEach(r=>{if(!latest.has(r.employee_id||r.employee_name))latest.set(r.employee_id||r.employee_name,r)});setOpen([...latest.values()].filter(r=>r.type==='entrada'))}async function closeManual(r){const now=new Date();const suggested=now.toISOString().slice(0,16);const value=prompt(`Hora de salida real para ${r.employee_name} (formato YYYY-MM-DDTHH:mm)`,suggested);if(!value)return;const reason=prompt('Motivo del cierre manual','Olvido de fichaje')||'Cierre manual por manager';const exitIso=new Date(value).toISOString();const {error}=await supabase.from('clock_records').insert({employee_id:r.employee_id,employee_name:r.employee_name,type:'salida',method:'manual',inside_radius:true,note:`SALIDA MANUAL POR MANAGER · ${reason}`,created_at:exitIso});if(error){alert(error.message);return}alert('Turno cerrado manualmente');load()}const expected=expectedStartMapToday();const entradaRows=rows.filter(r=>String(r.type).toLowerCase()==='entrada');const late5=entradaRows.filter(r=>punctualityFor(r,expected).cls==='late5').length;const late10=entradaRows.filter(r=>punctualityFor(r,expected).cls==='late10').length;return <div className="grid"><div className="card"><h2>Fichajes abiertos</h2><button onClick={load}>Actualizar</button>{open.length===0&&<p>✅ No hay turnos abiertos.</p>}{open.map(r=><div className="employee" key={r.id}><b>{r.employee_name}</b><span>Entrada: {new Date(r.created_at).toLocaleString()}</span><span>{Math.max(0,((Date.now()-new Date(r.created_at))/3600000)).toFixed(1)} h abierto</span><button className="red" onClick={()=>closeManual(r)}>Cerrar turno</button></div>)}</div><div className="card"><h2>Puntualidad</h2><p>🟢 Puntual · 🟡 +5 min · ⚠️ +10 min · 🔴 Salida</p><p>Entradas amarillas: <b>{late5}</b></p><p>Alertas +10 min: <b>{late10}</b></p><p className="mutedText">La puntualidad se compara con el cuadrante semanal guardado en este navegador.</p></div><div className="card wide"><h2>Historial de fichajes</h2><table><tbody>{rows.slice(0,160).map(r=>{const p=punctualityFor(r,expected);return <tr key={r.id} className={'clockRow '+p.cls}><td>{new Date(r.created_at).toLocaleString()}</td><td>{r.employee_name}</td><td>{p.icon} {p.label}</td><td>{r.type}</td><td>{r.method}</td><td>{r.note||''}</td><td>{r.distance_m?Math.round(r.distance_m)+' m':''}</td></tr>})}</tbody></table></div></div>}
-
+function ClockPanel(){
+ const[rows,setRows]=useState([]);const[open,setOpen]=useState([]);const[scheduleWeeks,setScheduleWeeks]=useState({});const[loading,setLoading]=useState(false);
+ useEffect(()=>{load()},[]);
+ async function load(){
+  if(!supabase)return;setLoading(true);
+  const{data,error}=await supabase.from('clock_records').select('*').order('created_at',{ascending:false}).limit(500);
+  if(error){setLoading(false);alert(error.message);return}
+  const list=data||[];setRows(list);
+  const latest=new Map();list.forEach(r=>{const key=clockPersonKey(r.employee_id||r.employee_name);if(!latest.has(key))latest.set(key,r)});
+  setOpen([...latest.values()].filter(r=>String(r.type).toLowerCase()==='entrada'));
+  const weekIds=[...new Set(list.map(r=>clockWeekId(r.created_at)).filter(Boolean))];
+  if(weekIds.length){
+   const{data:schedules,error:scheduleError}=await supabase.from('work_schedule_weeks').select('week_id,data,employees,revision,updated_at').eq('restaurant_id','colibri').in('week_id',weekIds);
+   if(scheduleError)console.warn('No se pudo cargar el cuadrante para fichajes',scheduleError);
+   const map={};(schedules||[]).forEach(s=>map[s.week_id]=s);setScheduleWeeks(map);
+  }else setScheduleWeeks({});
+  setLoading(false);
+ }
+ async function closeManual(r){
+  const now=new Date();const suggested=new Date(now-now.getTimezoneOffset()*60000).toISOString().slice(0,16);
+  const value=prompt(`Hora de salida real para ${r.employee_name} (formato YYYY-MM-DDTHH:mm)`,suggested);if(!value)return;
+  const reason=prompt('Motivo del cierre manual','Olvido de fichaje')||'Cierre manual por manager';const exitIso=new Date(value).toISOString();
+  const {error}=await supabase.from('clock_records').insert({employee_id:r.employee_id,employee_name:r.employee_name,type:'salida',method:'manual',inside_radius:true,note:`SALIDA MANUAL POR MANAGER · ${reason}`,created_at:exitIso});
+  if(error){alert(error.message);return}alert('Turno cerrado manualmente');load();
+ }
+ const decorated=rows.map(r=>{const assignment=scheduleAssignmentFor(r,scheduleWeeks);return {...r,assignment,punctuality:punctualityFor(r,assignment)}});
+ const entradaRows=decorated.filter(r=>String(r.type).toLowerCase()==='entrada');const late5=entradaRows.filter(r=>r.punctuality.cls==='late5').length;const late10=entradaRows.filter(r=>r.punctuality.cls==='late10').length;const matched=entradaRows.filter(r=>r.assignment).length;
+ return <div className="clockPanelPro">
+  <div className="card clockOpenCard">
+   <div className="clockSectionHead"><div><span className="sectionEyebrow">Control en tiempo real</span><h2>Fichajes abiertos</h2><p>{open.length} {open.length===1?'turno abierto':'turnos abiertos'} ahora mismo</p></div><button onClick={load} disabled={loading}>{loading?'Actualizando…':'Actualizar'}</button></div>
+   {open.length===0&&<div className="clockEmpty">✅ No hay turnos abiertos.</div>}
+   <div className="clockOpenList">{open.map(r=>{const a=scheduleAssignmentFor(r,scheduleWeeks);return <article className="clockOpenItem" key={r.id}><div className="clockEmployeeMain"><b>{r.employee_name}</b><span>Entrada · {new Date(r.created_at).toLocaleString('es-ES')}</span><small>{a?`Cuadrante: ${a.day} ${a.label}`:'⚠️ No aparece asignado en el cuadrante de esa semana'}</small></div><div className="clockDuration"><b>{Math.max(0,((Date.now()-new Date(r.created_at))/3600000)).toFixed(1)} h</b><span>abierto</span></div><button className="red clockCloseButton" onClick={()=>closeManual(r)}>Cerrar turno</button></article>})}</div>
+  </div>
+  <div className="card clockStatsCard"><span className="sectionEyebrow">Cruce automático con Supabase</span><h2>Puntualidad</h2><div className="clockStatGrid"><article><b>{matched}</b><span>Entradas con turno localizado</span></article><article><b>{late5}</b><span>Retrasos de 6 a 10 min</span></article><article><b>{late10}</b><span>Alertas de más de 10 min</span></article></div><div className="clockLegend"><span>🟢 Puntual</span><span>🔵 Antes de hora</span><span>🟡 +5 min</span><span>⚠️ +10 min</span><span>🔴 Salida</span></div><p className="mutedText">Cada fichaje se compara con el cuadrante compartido de Supabase correspondiente a su fecha, semana, empleado y franja.</p></div>
+  <div className="card wide clockHistoryCard"><div className="clockSectionHead"><div><span className="sectionEyebrow">Registro verificable</span><h2>Historial de fichajes</h2></div><span className="clockCount">{Math.min(160,decorated.length)} registros</span></div><div className="clockHistoryList">{decorated.slice(0,160).map(r=><article key={r.id} className={'clockHistoryItem '+r.punctuality.cls}><div className="clockHistoryWhen"><b>{new Date(r.created_at).toLocaleDateString('es-ES')}</b><span>{new Date(r.created_at).toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit',second:'2-digit'})}</span></div><div className="clockHistoryPerson"><b>{r.employee_name}</b><span>{r.punctuality.icon} {r.punctuality.label}</span></div><div className="clockHistoryMeta"><span className={'clockType '+String(r.type).toLowerCase()}>{String(r.type).toUpperCase()}</span><small>{String(r.method||'').toUpperCase()}{r.distance_m?` · ${Math.round(r.distance_m)} m`:''}</small></div>{r.note&&<div className="clockHistoryNote">{r.note}</div>}</article>)}</div></div>
+ </div>
+}
 
 function paymentLabel(t){const p=String(t.forma_pago||'').toUpperCase();return p==='E'?'Efectivo':p==='T'?'Tarjeta':p==='A'?'Ambas':p==='CH'?'Cheque':p||'-'}
 function ticketStatusLabel(t){const e=String(t.estado||'C').toUpperCase();return e==='X'?'Anulado':e==='G'?'Gasto':e==='C'?'Cobrado':e}
