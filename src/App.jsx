@@ -1051,11 +1051,23 @@ function Profitability(){
 }
 
 
+function inventoryParseJSON(key,fallback){
+ try{
+  const raw=localStorage.getItem(key);
+  if(!raw)return fallback;
+  const parsed=JSON.parse(raw);
+  return parsed&&typeof parsed==='object'?parsed:fallback;
+ }catch(error){
+  console.warn('Datos locales de almacén no válidos; se usarán valores iniciales.',error);
+  return fallback;
+ }
+}
+
 function Inventory(){
  const[tab,setTab]=useState('resumen');
  const[loading,setLoading]=useState(true),[error,setError]=useState('');
  const[data,setData]=useState({masters:[],items:[],recipes:[],ingredients:[],links:[],sales:[]});
- const[state,setState]=useState(()=>parseJSON('colibri_inventory_v7',{stocks:{},counts:[],waste:[],minimums:{},adjustments:[]}));
+ const[state,setState]=useState(()=>inventoryParseJSON('colibri_inventory_v7',{stocks:{},counts:[],waste:[],minimums:{},adjustments:[]}));
  const[query,setQuery]=useState(''),[countItem,setCountItem]=useState(''),[countQty,setCountQty]=useState('');
  const[wasteItem,setWasteItem]=useState(''),[wasteQty,setWasteQty]=useState(''),[wasteReason,setWasteReason]=useState('');
  const[days,setDays]=useState(7);
@@ -1168,7 +1180,7 @@ class ModuleErrorBoundary extends React.Component{
  constructor(props){super(props);this.state={error:null}}
  static getDerivedStateFromError(error){return {error}}
  componentDidCatch(error,info){console.error('Error módulo',this.props.name,error,info)}
- render(){if(this.state.error)return <div className="card"><h2>⚠️ Error en {this.props.name}</h2><p>El módulo ha fallado, pero el ERP sigue operativo.</p><pre style={{whiteSpace:'pre-wrap'}}>{String(this.state.error?.message||this.state.error)}</pre><button onClick={()=>{localStorage.removeItem('colibriSchedule');localStorage.removeItem('colibriScheduleEmployees');this.setState({error:null});location.reload()}}>Reiniciar datos locales del cuadrante</button></div>;return this.props.children}
+ render(){if(this.state.error)return <div className="card"><h2>⚠️ Error en {this.props.name}</h2><p>El módulo ha fallado, pero el ERP sigue operativo.</p><pre style={{whiteSpace:'pre-wrap'}}>{String(this.state.error?.message||this.state.error)}</pre><button onClick={()=>{if(this.props.name==='almacen'){localStorage.removeItem('colibri_inventory_v7')}else{localStorage.removeItem('colibriSchedule');localStorage.removeItem('colibriScheduleEmployees')}this.setState({error:null});location.reload()}}>Reiniciar datos locales de {this.props.name==='almacen'?'almacén':'cuadrante'}</button></div>;return this.props.children}
 }
 
 function App(){const host=location.hostname;const onlyClock=host.startsWith('fichar.')||location.pathname.includes('fichar');const [authed,setAuthed]=useState(false);return <>{onlyClock?<PeoplePortal supabase={supabase} Brand={Brand}/>:<>{!authed?<Login onOk={()=>setAuthed(true)}/>:<Manager/>}</>}</>}
