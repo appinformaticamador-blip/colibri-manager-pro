@@ -1176,6 +1176,66 @@ function Settings(){
 }
 
 
+
+
+// COLIBRÍ IA 8.0 · asistente conversacional basado en datos reales del ERP
+function aiPct(current,base){return base?((current-base)/base)*100:current?100:0}
+function aiWords(text){return String(text||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'')}
+function aiSummary(tickets){const valid=(tickets||[]).filter(isRealSaleTicket);const total=valid.reduce((a,t)=>a+Number(t.total||0),0);const efectivo=valid.reduce((a,t)=>a+Number(t.efectivo||0),0);const tarjeta=valid.reduce((a,t)=>a+Number(t.tarjeta||0),0);return{total,tickets:valid.length,avg:valid.length?total/valid.length:0,efectivo,tarjeta}}
+function aiTopProducts(lines,costMap,limit=8){const map=new Map();(lines||[]).forEach(l=>{const f=lineFinancials(l,costMap);const key=f.code||String(l.descripcion||'Sin código');const row=map.get(key)||{code:key,name:f.info?.name||l.descripcion||key,qty:0,revenue:0,cost:0,known:0};row.qty+=f.qty;row.revenue+=f.revenue;if(f.known){row.cost+=f.cost;row.known+=f.revenue}map.set(key,row)});return[...map.values()].map(r=>({...r,profit:r.revenue-r.cost,margin:r.known?r.profit/r.revenue*100:null})).sort((a,b)=>b.revenue-a.revenue).slice(0,limit)}
+async function loadAIContext(){
+ const end=addDays(today(),1),from30=addDays(today(),-29),prevFrom=addDays(today(),-59),prevTo=from30;
+ const [todayData,yesterdayData,weekAgoData,monthData,prevMonthData,costMap,service,closure]=await Promise.all([
+  loadSalesRange(today(),end),loadSalesRange(addDays(today(),-1),today()),loadSalesRange(addDays(today(),-7),addDays(today(),-6)),loadSalesRange(from30,end),loadSalesRange(prevFrom,prevTo),loadProfitabilityCostMap(),loadServiceState(),loadCashClosure(today())
+ ]);
+ let clocks=[],employees=[],invoices=[];
+ if(supabase){
+  const start=today()+'T00:00:00';
+  const [c,e,i]=await Promise.all([
+   supabase.from('clock_records').select('*').gte('created_at',start).order('created_at',{ascending:true}).limit(1000),
+   supabase.from('employees').select('*').eq('active',true).limit(200),
+   supabase.from('purchase_invoices').select('id,status,total,invoice_date,invoice_number').order('invoice_date',{ascending:false}).limit(500)
+  ]);clocks=c.data||[];employees=e.data||[];invoices=i.data||[];
+ }
+ return{todayData,yesterdayData,weekAgoData,monthData,prevMonthData,costMap,service,closure,clocks,employees,invoices,loadedAt:new Date().toISOString()};
+}
+function buildAIAnswer(question,ctx){
+ const q=aiWords(question),t=aiSummary(ctx.todayData.tickets),y=aiSummary(ctx.yesterdayData.tickets),w=aiSummary(ctx.weekAgoData.tickets),m=aiSummary(ctx.monthData.tickets),pm=aiSummary(ctx.prevMonthData.tickets),fin=periodFinancials(ctx.monthData.lines,ctx.costMap),todayFin=periodFinancials(ctx.todayData.lines,ctx.costMap),tops=aiTopProducts(ctx.monthData.lines,ctx.costMap,12);const open=ctx.service?.open||[];
+ const pendingInvoices=(ctx.invoices||[]).filter(x=>!['confirmed','reviewed','approved','paid'].includes(String(x.status||'').toLowerCase()));
+ const openClock=new Map();(ctx.clocks||[]).forEach(r=>{const k=r.employee_id||r.employee_name;if(String(r.type).toLowerCase()==='entrada')openClock.set(k,r);else if(String(r.type).toLowerCase()==='salida')openClock.delete(k)});
+ const deltaY=aiPct(t.total,y.total),deltaW=aiPct(t.total,w.total),deltaM=aiPct(m.total,pm.total);
+ let title='Resumen del negocio',body='',facts=[],recommendations=[];
+ if(q.includes('efectivo')||q.includes('caja')){
+  title='Situación de caja de hoy';body=`Las ventas cobradas en efectivo suman ${money(t.efectivo)} y en tarjeta ${money(t.tarjeta)}. ${ctx.closure?'Existe un cierre de caja registrado para hoy.':'Todavía no consta un cierre de caja para hoy.'}`;facts=[`Ventas totales: ${money(t.total)}`,`Efectivo: ${money(t.efectivo)}`,`Tarjeta: ${money(t.tarjeta)}`,`Tickets: ${t.tickets}`];recommendations.push(ctx.closure?'Revisar que el cierre coincida con los cobros del TPV.':'Realizar el cierre al terminar el servicio y comprobar posibles descuadres.');
+ }else if(q.includes('producto')||q.includes('margen')||q.includes('rentab')){
+  const low=tops.filter(x=>x.margin!==null).sort((a,b)=>a.margin-b.margin).slice(0,5);title='Análisis de productos y rentabilidad';body=`En los últimos 30 días se han registrado ${money(m.total)} en ventas. El coste conocido asciende a ${money(fin.cost)} y el margen estimado es del ${fin.margin.toFixed(1)}%.`;
+  facts=tops.slice(0,5).map(x=>`${x.name}: ${money(x.revenue)} vendidos · ${x.margin===null?'coste sin configurar':`${x.margin.toFixed(1)}% de margen`}`);if(fin.unknownRevenue>0)recommendations.push(`Configurar costes para ${money(fin.unknownRevenue)} de ventas que todavía no tienen coste fiable.`);if(low.length)recommendations.push(`Revisar primero ${low[0].name}, que presenta el margen conocido más bajo (${low[0].margin.toFixed(1)}%).`);
+ }else if(q.includes('personal')||q.includes('empleado')||q.includes('turno')||q.includes('fichaje')){
+  title='Situación del personal';body=`Hay ${ctx.employees.length} empleados activos y ${openClock.size} fichajes actualmente abiertos.`;facts=[`Empleados activos: ${ctx.employees.length}`,`Fichajes abiertos: ${openClock.size}`,`Registros de fichaje hoy: ${ctx.clocks.length}`];recommendations.push(openClock.size?'Comprobar que los turnos abiertos correspondan a personal realmente trabajando.':'No aparecen fichajes abiertos pendientes en este momento.');
+ }else if(q.includes('atencion')||q.includes('alerta')||q.includes('problema')||q.includes('revisar')){
+  title='Qué requiere atención';const alerts=[];if(!ctx.closure)alerts.push('Hoy todavía no tiene cierre de caja');if(open.length)alerts.push(`${open.length} cuentas o mesas continúan abiertas`);if(pendingInvoices.length)alerts.push(`${pendingInvoices.length} facturas permanecen pendientes de revisión`);if(fin.unknownRevenue>0)alerts.push(`${money(fin.unknownRevenue)} de ventas de 30 días no tienen coste configurado`);if(openClock.size)alerts.push(`${openClock.size} fichajes siguen abiertos`);body=alerts.length?'He encontrado varios puntos que conviene revisar.':'No se detectan incidencias importantes con los datos disponibles.';facts=alerts.length?alerts:['Sin alertas críticas detectadas'];recommendations.push(alerts[0]||'Mantener la revisión diaria del Centro de Mando.');
+ }else if(q.includes('compar')||q.includes('ayer')||q.includes('semana')){
+  title='Comparación de ventas';body=`Hoy acumulas ${money(t.total)} en ${t.tickets} tickets. Frente a ayer la variación es ${deltaY>=0?'+':''}${deltaY.toFixed(1)}% y frente al mismo día de la semana anterior ${deltaW>=0?'+':''}${deltaW.toFixed(1)}%.`;facts=[`Hoy: ${money(t.total)} · ${t.tickets} tickets`,`Ayer: ${money(y.total)} · ${y.tickets} tickets`,`Hace 7 días: ${money(w.total)} · ${w.tickets} tickets`,`Ticket medio hoy: ${money(t.avg)}`];recommendations.push(deltaW<0?'La venta va por debajo del mismo día anterior; revisar la franja horaria y el número de tickets.':'El ritmo supera al mismo día de la semana pasada.');
+ }else{
+  title='Resumen ejecutivo de hoy';body=`Hoy se han vendido ${money(t.total)} en ${t.tickets} tickets, con un ticket medio de ${money(t.avg)}. El beneficio directo conocido del día es ${money(todayFin.profit)} y hay ${open.length} cuentas abiertas.`;facts=[`Ventas: ${money(t.total)}`,`Tickets: ${t.tickets}`,`Ticket medio: ${money(t.avg)}`,`Beneficio directo conocido: ${money(todayFin.profit)}`,`Mes móvil 30 días: ${money(m.total)} (${deltaM>=0?'+':''}${deltaM.toFixed(1)}% frente a los 30 días anteriores)`];if(!ctx.closure)recommendations.push('El cierre de caja de hoy aún no consta como registrado.');if(fin.unknownRevenue>0)recommendations.push('Completar costes pendientes mejorará la precisión del beneficio.');
+ }
+ return{id:Date.now(),question,title,body,facts,recommendations,createdAt:new Date().toISOString(),period:'Datos actualizados hasta '+new Date(ctx.loadedAt).toLocaleString('es-ES')};
+}
+function AIWhatsApp(answer){return `🤖 COLIBRÍ IA · ${answer.title}\n\n${answer.body}\n\n${answer.facts.map(x=>'• '+x).join('\n')}${answer.recommendations.length?'\n\nRECOMENDACIÓN\n'+answer.recommendations.map(x=>'• '+x).join('\n'):''}\n\n${answer.period}`}
+function BusinessAssistant(){
+ const[ctx,setCtx]=useState(null),[loading,setLoading]=useState(true),[question,setQuestion]=useState(''),[messages,setMessages]=useState(()=>{try{return JSON.parse(localStorage.getItem('colibri_ai8_history')||'[]')}catch{return[]}}),[error,setError]=useState('');
+ useEffect(()=>{refresh()},[]);useEffect(()=>{localStorage.setItem('colibri_ai8_history',JSON.stringify(messages.slice(-30)))},[messages]);
+ async function refresh(){try{setLoading(true);setError('');setCtx(await loadAIContext())}catch(e){setError(e.message||String(e))}finally{setLoading(false)}}
+ function ask(text=question){const clean=String(text||'').trim();if(!clean||!ctx)return;const answer=buildAIAnswer(clean,ctx);setMessages(v=>[...v,answer]);setQuestion('')}
+ async function copy(answer){const txt=AIWhatsApp(answer);try{await navigator.clipboard.writeText(txt);alert('Resumen copiado para WhatsApp')}catch{prompt('Copia el texto:',txt)}}
+ const quick=['Resumen de hoy','¿Qué requiere atención?','Compárame con ayer y la semana pasada','Analiza productos y rentabilidad','Revisa personal y fichajes','¿Cuánto efectivo debería tener hoy?'];
+ return <div className="ai8"><div className="card hero ai8Hero"><div><span className="sectionEyebrow">COLIBRÍ IA 8.0 · ASISTENTE DEL NEGOCIO</span><h2>Pregunta directamente por tu negocio</h2><p>Respuestas calculadas con ventas, costes, TPV, cierres, facturas y fichajes reales del ERP.</p></div><button onClick={refresh} disabled={loading}>{loading?'Actualizando…':'Actualizar datos'}</button></div>
+ {error&&<div className="alertBad">{error}</div>}<div className="ai8Quick">{quick.map(x=><button key={x} onClick={()=>ask(x)} disabled={!ctx||loading}>{x}</button>)}</div>
+ <div className="card ai8Composer"><textarea value={question} onChange={e=>setQuestion(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();ask()}}} placeholder="Ejemplo: ¿Por qué estoy vendiendo menos que la semana pasada?"/><button onClick={()=>ask()} disabled={!question.trim()||!ctx||loading}>Preguntar</button><small>Modo seguro: solo consulta y análisis. No modifica ningún dato del ERP.</small></div>
+ <div className="ai8Conversation">{!messages.length&&<div className="card ai8Welcome"><h2>Hola, Alfonso</h2><p>Selecciona una pregunta rápida o escribe lo que quieres saber. El asistente no inventa datos: cuando una cifra no está disponible, lo indicará.</p></div>}{messages.slice().reverse().map(a=><article className="card ai8Answer" key={a.id}><div className="ai8Question">Tú: {a.question}</div><div className="ai8AnswerHead"><div><span>COLIBRÍ IA</span><h2>{a.title}</h2></div><button onClick={()=>copy(a)}>Copiar WhatsApp</button></div><p className="ai8Body">{a.body}</p><div className="ai8Facts">{a.facts.map((x,i)=><div key={i}>{x}</div>)}</div>{a.recommendations.length>0&&<div className="ai8Recommendation"><b>Recomendación</b>{a.recommendations.map((x,i)=><p key={i}>{x}</p>)}</div>}<small>{a.period}</small></article>)}</div>
+ {messages.length>0&&<button className="ai8Clear" onClick={()=>{if(confirm('¿Borrar el historial del asistente?'))setMessages([])}}>Borrar historial</button>}</div>
+}
+
 class ModuleErrorBoundary extends React.Component{
  constructor(props){super(props);this.state={error:null}}
  static getDerivedStateFromError(error){return {error}}
@@ -1189,11 +1249,11 @@ function Brand(){return <div className="brand"><div className="brandMark"><img s
 function Manager(){
  const initial=history.state?.colibriRoute||{tab:'dashboard',section:null,payload:null};
  const[route,setRoute]=useState(initial);
- const tabs=[['dashboard','⌂','Dashboard'],['servicio','◉','Centro mando'],['inteligencia','✦','Inteligencia'],['tpv','▣','TPV'],['gestoria','▤','Gestoría'],['rentabilidad','€','Rentabilidad'],['almacen','▥','Almacén'],['empleados','♟','Empleados'],['fichajes','◷','Fichajes'],['cuadrantes','▦','Cuadrantes'],['comparador','⇄','Comparador'],['config','⚙','Configuración']];
+ const tabs=[['dashboard','⌂','Dashboard'],['servicio','◉','Centro mando'],['inteligencia','✦','Inteligencia'],['tpv','▣','TPV'],['gestoria','▤','Gestoría'],['rentabilidad','€','Rentabilidad'],['almacen','▥','Almacén'],['asistente','✧','IA del negocio'],['empleados','♟','Empleados'],['fichajes','◷','Fichajes'],['cuadrantes','▦','Cuadrantes'],['comparador','⇄','Comparador'],['config','⚙','Configuración']];
  useEffect(()=>{const onPop=e=>setRoute(e.state?.colibriRoute||{tab:'dashboard',section:null,payload:null});addEventListener('popstate',onPop);return()=>removeEventListener('popstate',onPop)},[]);
  function navigate(tab,section=null,payload=null,{replace=false}={}){const next={tab,section,payload};setRoute(next);const fn=replace?'replaceState':'pushState';history[fn]({...(history.state||{}),colibriRoute:next},'',location.href);requestAnimationFrame(()=>scrollTo({top:0,behavior:'smooth'}));}
  const tab=route.tab;
- return <div className="erpShell"><aside className="erpSidebar"><Brand/><nav className="sideNav">{tabs.map(([id,icon,label])=><button className={tab===id?'active':''} onClick={()=>navigate(id)} key={id}><span>{icon}</span><b>{label}</b></button>)}</nav><div className="sidebarFooter"><div className="userAvatar">A</div><div><b>Alfonso</b><small>Gerencia</small></div></div></aside><main className="erpMain"><div className="mobileTop"><Brand/></div><section className="page"><ModuleErrorBoundary key={`${tab}-${route.section||''}-${JSON.stringify(route.payload||{})}`} name={tab}>{tab==='dashboard'&&<Dashboard onNavigate={navigate}/>} {tab==='servicio'&&<CommandCenter initialView={route.section||'plano'} focusAccount={route.payload}/>} {tab==='inteligencia'&&<BusinessIntelligence/>}{tab==='empleados'&&<Employees/>}{tab==='fichajes'&&<ClockPanel/>}{tab==='cuadrantes'&&<Schedule/>}{tab==='comparador'&&<Compare/>}{tab==='tpv'&&<TPV/>}{tab==='gestoria'&&<Gestoria/>}{tab==='rentabilidad'&&<Profitability/>}{tab==='almacen'&&<Inventory/>}{tab==='config'&&<Settings/>}</ModuleErrorBoundary></section></main></div>}
+ return <div className="erpShell"><aside className="erpSidebar"><Brand/><nav className="sideNav">{tabs.map(([id,icon,label])=><button className={tab===id?'active':''} onClick={()=>navigate(id)} key={id}><span>{icon}</span><b>{label}</b></button>)}</nav><div className="sidebarFooter"><div className="userAvatar">A</div><div><b>Alfonso</b><small>Gerencia</small></div></div></aside><main className="erpMain"><div className="mobileTop"><Brand/></div><section className="page"><ModuleErrorBoundary key={`${tab}-${route.section||''}-${JSON.stringify(route.payload||{})}`} name={tab}>{tab==='dashboard'&&<Dashboard onNavigate={navigate}/>} {tab==='servicio'&&<CommandCenter initialView={route.section||'plano'} focusAccount={route.payload}/>} {tab==='inteligencia'&&<BusinessIntelligence/>}{tab==='empleados'&&<Employees/>}{tab==='fichajes'&&<ClockPanel/>}{tab==='cuadrantes'&&<Schedule/>}{tab==='comparador'&&<Compare/>}{tab==='tpv'&&<TPV/>}{tab==='gestoria'&&<Gestoria/>}{tab==='rentabilidad'&&<Profitability/>}{tab==='almacen'&&<Inventory/>}{tab==='asistente'&&<BusinessAssistant/>}{tab==='config'&&<Settings/>}</ModuleErrorBoundary></section></main></div>}
 
 function getGreeting(){const h=new Date().getHours();if(h<12)return 'Buenos días';if(h<20)return 'Buenas tardes';return 'Buenas noches'}
 function pctDiff(a,b){a=Number(a||0);b=Number(b||0);if(!b)return null;return ((a-b)/b)*100}
