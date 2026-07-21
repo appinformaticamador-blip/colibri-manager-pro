@@ -27,6 +27,15 @@ function dist(lat1,lon1,lat2,lon2){const R=6371000,dLat=(lat2-lat1)*Math.PI/180,
 function today(){return new Date().toISOString().slice(0,10)}
 function week(){const d=new Date();const y=d.getFullYear();const onejan=new Date(y,0,1);return `${y}-W${String(Math.ceil((((d-onejan)/86400000)+onejan.getDay()+1)/7)).padStart(2,'0')}`}
 
+function readLocalJSON(key,fallback){
+ try{
+  const raw=localStorage.getItem(key);
+  if(!raw)return fallback;
+  const value=JSON.parse(raw);
+  return value??fallback;
+ }catch{return fallback}
+}
+
 function money(v){return new Intl.NumberFormat('es-ES',{style:'currency',currency:'EUR'}).format(Number(v||0))}
 function fmtDate(d){return new Date(d+'T12:00:00').toLocaleDateString('es-ES',{weekday:'long',day:'2-digit',month:'2-digit',year:'numeric'})}
 function addDays(dateStr,n){const d=new Date(dateStr+'T12:00:00');d.setDate(d.getDate()+n);return d.toISOString().slice(0,10)}
@@ -1127,7 +1136,7 @@ function Settings(){
  const[geo,setGeo]=useState({loading:false,message:'',ok:null,distance:null});
  const[systemCheck,setSystemCheck]=useState({loading:false,supabase:null,message:''});
  const[advanced,setAdvanced]=useState(false);
- const[prefs,setPrefs]=useState(()=>parseJSON(localStorage.getItem('colibri_system_preferences'),{
+ const[prefs,setPrefs]=useState(()=>readLocalJSON('colibri_system_preferences',{
   business_name:'Brasería El Colibrí',business_address:'Av. Carlos V, local 3',business_phone:'',
   labour_cost_hour:7,monthly_sales_goal:0,vat_rate:10,currency:'EUR',punctuality_grace:5,
   late_alert_minutes:10,max_open_clock_hours:12,gps_enabled:true,qr_enabled:true,
