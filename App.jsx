@@ -308,27 +308,16 @@ function ivaSummary(lines){
  const m={};(lines||[]).forEach(l=>{const iva=Number(l.iva||0);const total=Number(l.importe||0);const base=iva>0?total/(1+iva/100):total;const cuota=total-base;const k=String(iva);m[k]=m[k]||{iva,base:0,cuota:0,total:0};m[k].base+=base;m[k].cuota+=cuota;m[k].total+=total;});
  return Object.values(m).sort((a,b)=>a.iva-b.iva);
 }
-function clockPersonKey(value){return String(value||'').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'')}
-function clockWeekId(value){const d=new Date(value);const y=d.getFullYear();const onejan=new Date(y,0,1);return `${y}-W${String(Math.ceil((((d-onejan)/86400000)+onejan.getDay()+1)/7)).padStart(2,'0')}`}
-function clockDayName(value){const d=new Date(value);return DAYS[(d.getDay()+6)%7]}
-function scheduleAssignmentFor(row,scheduleWeeks){
- const weekId=clockWeekId(row.created_at);const schedule=scheduleWeeks?.[weekId];if(!schedule)return null;
- const day=clockDayName(row.created_at);const data=schedule.data||{};const employeeId=clockPersonKey(row.employee_id);const employeeName=clockPersonKey(row.employee_name);
- const employee=(schedule.employees||[]).find(e=>clockPersonKey(e.id)===employeeId||clockPersonKey(e.name)===employeeName||clockPersonKey(e.name)===employeeId);
- const keys=new Set([employeeId,employeeName,clockPersonKey(employee?.id),clockPersonKey(employee?.name)].filter(Boolean));
- const slots=SLOTS.filter(slot=>{const ids=data?.[day]?.[slot]||[];return ids.some(id=>keys.has(clockPersonKey(id)))});
- if(!slots.length)return null;
- const first=slots[0],last=slots[slots.length-1];const start=first.split('-')[0];const end=last.split('-')[1];
- return {weekId,day,slots,start,end,label:`${start}-${end}`};
+function expectedStartMapToday(){
+ try{const data=JSON.parse(localStorage.colibriSchedule||'{}');const day=DAYS[(new Date().getDay()+6)%7];const res={};Object.entries(data).forEach(([k,arr])=>{const parts=k.split('|');if(parts[1]!==day)return;const start=parts[2]?.split('-')[0];(arr||[]).forEach(e=>{if(!res[e.name]||start<res[e.name])res[e.name]=start;});});return res;}catch{return {}}
 }
-function punctualityFor(row,assignment){
- if(String(row.type).toLowerCase()==='salida')return {label:assignment?`Salida · ${assignment.label}`:'Salida',cls:'exit',icon:'🔴'};
- if(!assignment)return {label:'Sin turno asignado',cls:'neutral',icon:'⚪'};
- const d=new Date(row.created_at);const [h,m]=assignment.start.split(':').map(Number);const exp=new Date(d);exp.setHours(h,m,0,0);const diff=Math.round((d-exp)/60000);
- if(diff>10)return {label:`${assignment.label} · +${diff} min`,cls:'late10',icon:'⚠️'};
- if(diff>5)return {label:`${assignment.label} · +${diff} min`,cls:'late5',icon:'🟡'};
- if(diff<-10)return {label:`${assignment.label} · ${Math.abs(diff)} min antes`,cls:'early',icon:'🔵'};
- return {label:`${assignment.label} · ${diff>0?`+${diff} min`:'Puntual'}`,cls:'ok',icon:'🟢'};
+function punctualityFor(row,expected){
+ if(String(row.type).toLowerCase()==='salida')return {label:'Salida',cls:'exit',icon:'🔴'};
+ const st=expected?.[row.employee_name];if(!st)return {label:'Sin turno',cls:'neutral',icon:'⚪'};
+ const d=new Date(row.created_at);const [h,m]=st.split(':').map(Number);const exp=new Date(d);exp.setHours(h,m,0,0);const diff=Math.round((d-exp)/60000);
+ if(diff>10)return {label:`+${diff} min`,cls:'late10',icon:'⚠️'};
+ if(diff>5)return {label:`+${diff} min`,cls:'late5',icon:'🟡'};
+ return {label:diff>0?`+${diff} min`:'Puntual',cls:'ok',icon:'🟢'};
 }
 
 function summarizeTickets(tickets){
@@ -1061,12 +1050,93 @@ function Profitability(){
  </div>
 }
 
+
+function inventoryParseJSON(key,fallback){
+ try{
+  const raw=localStorage.getItem(key);
+  if(!raw)return fallback;
+  const parsed=JSON.parse(raw);
+  return parsed&&typeof parsed==='object'?parsed:fallback;
+ }catch(error){
+  console.warn('Datos locales de almacén no válidos; se usarán valores iniciales.',error);
+  return fallback;
+ }
+}
+
+function Inventory(){
+ const[tab,setTab]=useState('resumen');
+ const[loading,setLoading]=useState(true),[error,setError]=useState('');
+ const[data,setData]=useState({masters:[],items:[],recipes:[],ingredients:[],links:[],sales:[]});
+ const[state,setState]=useState(()=>inventoryParseJSON('colibri_inventory_v7',{stocks:{},counts:[],waste:[],minimums:{},adjustments:[]}));
+ const[query,setQuery]=useState(''),[countItem,setCountItem]=useState(''),[countQty,setCountQty]=useState('');
+ const[wasteItem,setWasteItem]=useState(''),[wasteQty,setWasteQty]=useState(''),[wasteReason,setWasteReason]=useState('');
+ const[days,setDays]=useState(7);
+ useEffect(()=>{load()},[]);
+ useEffect(()=>{localStorage.setItem('colibri_inventory_v7',JSON.stringify(state))},[state]);
+ async function load(){
+  if(!supabase){setError('Supabase no configurado');setLoading(false);return}
+  setLoading(true);setError('');
+  try{
+   const from=addDays(today(),-30);
+   const [m,i,r,ri,l,sales]=await Promise.all([
+    supabase.from('purchase_master_items').select('*').eq('active',true).order('name').limit(20000),
+    supabase.from('purchase_invoice_items').select('*,purchase_invoices(invoice_date,status,purchase_suppliers(name))').eq('review_status','confirmed').limit(20000),
+    supabase.from('profitability_recipes').select('*').limit(20000),
+    supabase.from('profitability_recipe_ingredients').select('*').limit(30000),
+    supabase.from('purchase_product_numier_links').select('*').limit(20000),
+    loadSalesRange(from,addDays(today(),1))
+   ]);
+   const e=m.error||i.error||r.error||ri.error||l.error;if(e)throw e;
+   setData({masters:m.data||[],items:i.data||[],recipes:r.data||[],ingredients:ri.data||[],links:l.data||[],sales:sales.lines||[]});
+  }catch(e){setError(e.message||String(e))}finally{setLoading(false)}
+ }
+ const movements=useMemo(()=>{
+  const purchased=new Map(),consumed=new Map();
+  (data.items||[]).forEach(x=>{if(!x.master_item_id)return;const q=Math.max(0,Number(x.quantity||0))*Math.max(1,Number(x.pack_units||1));purchased.set(String(x.master_item_id),(purchased.get(String(x.master_item_id))||0)+q)});
+  const recipeByCode=new Map((data.recipes||[]).map(r=>[String(r.numier_article_code||''),r]));
+  const ingredientsByRecipe=new Map();(data.ingredients||[]).forEach(i=>{const k=String(i.recipe_id);if(!ingredientsByRecipe.has(k))ingredientsByRecipe.set(k,[]);ingredientsByRecipe.get(k).push(i)});
+  const linkByCode=new Map();(data.links||[]).forEach(l=>linkByCode.set(String(l.numier_article_code||''),l));
+  (data.sales||[]).forEach(line=>{const code=String(line.articulo||''),qty=Math.abs(Number(line.cantidad||0));const recipe=recipeByCode.get(code);if(recipe){const yieldQty=Math.max(1,Number(recipe.yield_quantity||1));(ingredientsByRecipe.get(String(recipe.id))||[]).forEach(i=>{const used=qty*Number(i.quantity||0)/yieldQty;consumed.set(String(i.master_item_id),(consumed.get(String(i.master_item_id))||0)+used)})}else{const link=linkByCode.get(code);if(link){const used=qty*Math.max(0,Number(link.quantity_factor||1));consumed.set(String(link.master_item_id),(consumed.get(String(link.master_item_id))||0)+used)}}});
+  return{purchased,consumed};
+ },[data]);
+ const rows=useMemo(()=>data.masters.map(m=>{const id=String(m.id),opening=Number(state.stocks?.[id]||0),purchases=movements.purchased.get(id)||0,used=movements.consumed.get(id)||0,waste=(state.waste||[]).filter(x=>String(x.itemId)===id).reduce((a,x)=>a+Number(x.qty||0),0),adjust=(state.adjustments||[]).filter(x=>String(x.itemId)===id).reduce((a,x)=>a+Number(x.qty||0),0),theoretical=opening+purchases-used-waste+adjust,lastCount=[...(state.counts||[])].filter(x=>String(x.itemId)===id).sort((a,b)=>String(b.date).localeCompare(String(a.date)))[0],real=lastCount?Number(lastCount.qty||0):null,min=Number(state.minimums?.[id]||0),daily=used/30,coverage=daily>0?theoretical/daily:999,recommended=Math.max(0,(daily*Number(days||7)+min)-theoretical);return{...m,opening,purchases,used,waste,adjust,theoretical,real,diff:real===null?null:real-theoretical,min,daily,coverage,recommended}}).filter(r=>!query||normalizeProductName(r.name).includes(normalizeProductName(query))),[data,state,movements,query,days]);
+ const alerts=rows.filter(r=>r.theoretical<r.min||r.coverage<2||(r.diff!==null&&Math.abs(r.diff)>Math.max(1,r.theoretical*.1)));const stockValue=rows.reduce((a,r)=>a+Math.max(0,r.theoretical)*Number(r.manual_unit_cost||0),0);const purchaseValue=rows.reduce((a,r)=>a+r.recommended*Number(r.manual_unit_cost||0),0);
+ function setOpening(id,value){setState(v=>({...v,stocks:{...v.stocks,[id]:Number(value||0)}}))}
+ function setMinimum(id,value){setState(v=>({...v,minimums:{...v.minimums,[id]:Number(value||0)}}))}
+ function addCount(){if(!countItem||countQty==='')return alert('Selecciona artículo e indica cantidad');setState(v=>({...v,counts:[...v.counts,{id:Date.now(),itemId:countItem,qty:Number(countQty),date:new Date().toISOString()}]}));setCountQty('');alert('Inventario guardado')}
+ function addWaste(){if(!wasteItem||!Number(wasteQty))return alert('Selecciona artículo e indica cantidad');setState(v=>({...v,waste:[...v.waste,{id:Date.now(),itemId:wasteItem,qty:Number(wasteQty),reason:wasteReason||'Merma',date:new Date().toISOString()}]}));setWasteQty('');setWasteReason('');alert('Merma registrada')}
+ function exportOrder(){const lines=['ARTICULO;UNIDAD;STOCK TEORICO;COBERTURA DIAS;COMPRAR'];rows.filter(r=>r.recommended>0).forEach(r=>lines.push(`${r.name};${r.base_unit||'ud'};${r.theoretical.toFixed(2)};${r.coverage===999?'':r.coverage.toFixed(1)};${r.recommended.toFixed(2)}`));downloadFile(`PEDIDO_COLIBRI_${today()}.csv`,new Blob([lines.join('\n')],{type:'text/csv;charset=utf-8'}),'text/csv')}
+ if(loading)return <div className="card"><h2>Cargando Almacén 7.0…</h2></div>;
+ const tabs=[['resumen','Resumen'],['stock','Stock'],['inventario','Inventario'],['mermas','Mermas'],['pedido','Pedido recomendado']];
+ return <div className="inventory7"><div className="card hero inventoryHero"><div><span className="sectionEyebrow">ALMACÉN 7.0 · STOCK Y COMPRAS</span><h2>Stock teórico, inventario y previsión</h2><p>Entradas desde facturas, consumo desde ventas y escandallos, mermas y pedido recomendado.</p></div><div className="row controls"><input placeholder="Buscar artículo" value={query} onChange={e=>setQuery(e.target.value)}/><button onClick={load}>Actualizar</button></div></div>{error&&<div className="warnBox">{error}</div>}
+ <div className="grid inventoryKpis"><div className="card kpi"><span>Artículos</span><b>{rows.length}</b></div><div className="card kpi"><span>Valor stock estimado</span><b>{money(stockValue)}</b></div><div className="card kpi"><span>Alertas</span><b className={alerts.length?'bad':'ok'}>{alerts.length}</b></div><div className="card kpi"><span>Pedido recomendado</span><b>{money(purchaseValue)}</b></div></div>
+ <nav className="tpvTabs">{tabs.map(([v,l])=><button key={v} className={tab===v?'active':''} onClick={()=>setTab(v)}>{l}</button>)}</nav>
+ {tab==='resumen'&&<div className="grid"><div className="card"><h2>Alertas de almacén</h2>{alerts.length?alerts.slice(0,12).map(r=><div className="inventoryAlert" key={r.id}><div><b>{r.name}</b><small>{r.theoretical<r.min?'Por debajo del mínimo':r.coverage<2?'Menos de 2 días de cobertura':'Descuadre de inventario'}</small></div><strong>{r.coverage===999?'—':`${r.coverage.toFixed(1)} días`}</strong></div>):<div className="alertOk">No hay alertas críticas de stock.</div>}</div><div className="card"><h2>Calidad del control</h2><p>Artículos con escandallo o vínculo: <b>{rows.filter(r=>r.used>0).length}</b></p><p>Artículos con stock mínimo: <b>{rows.filter(r=>r.min>0).length}</b></p><p>Artículos contados: <b>{rows.filter(r=>r.real!==null).length}</b></p><p>Consumo calculado últimos 30 días: <b>{rows.reduce((a,r)=>a+r.used,0).toFixed(1)} unidades base</b></p></div></div>}
+ {tab==='stock'&&<div className="card"><div className="row between"><div><h2>Stock teórico</h2><p>Stock inicial + compras − consumo − mermas + ajustes.</p></div></div><div className="tableScroll"><table><thead><tr><th>Artículo</th><th>Unidad</th><th>Inicial</th><th>Entradas</th><th>Consumo 30d</th><th>Merma</th><th>Teórico</th><th>Real</th><th>Diferencia</th><th>Mínimo</th></tr></thead><tbody>{rows.map(r=><tr key={r.id}><td><b>{r.name}</b><small>{r.category||''}</small></td><td>{r.base_unit||'ud'}</td><td><input className="inventoryNumber" type="number" step="0.01" value={r.opening} onChange={e=>setOpening(String(r.id),e.target.value)}/></td><td>{r.purchases.toFixed(2)}</td><td>{r.used.toFixed(2)}</td><td>{r.waste.toFixed(2)}</td><td><b>{r.theoretical.toFixed(2)}</b></td><td>{r.real===null?'—':r.real.toFixed(2)}</td><td className={r.diff===null?'':Math.abs(r.diff)>.01?'bad':'ok'}>{r.diff===null?'—':r.diff.toFixed(2)}</td><td><input className="inventoryNumber" type="number" step="0.01" value={r.min} onChange={e=>setMinimum(String(r.id),e.target.value)}/></td></tr>)}</tbody></table></div></div>}
+ {tab==='inventario'&&<div className="grid"><div className="card"><h2>Nuevo recuento</h2><label>Artículo<select value={countItem} onChange={e=>setCountItem(e.target.value)}><option value="">Seleccionar…</option>{data.masters.map(m=><option value={m.id} key={m.id}>{m.name} ({m.base_unit||'ud'})</option>)}</select></label><label>Cantidad real<input type="number" step="0.01" value={countQty} onChange={e=>setCountQty(e.target.value)}/></label><button onClick={addCount}>Guardar inventario</button></div><div className="card"><h2>Últimos recuentos</h2>{[...(state.counts||[])].sort((a,b)=>String(b.date).localeCompare(String(a.date))).slice(0,20).map(x=>{const m=data.masters.find(i=>String(i.id)===String(x.itemId));return <div className="inventoryHistory" key={x.id}><div><b>{m?.name||'Artículo'}</b><small>{new Date(x.date).toLocaleString('es-ES')}</small></div><strong>{Number(x.qty).toFixed(2)} {m?.base_unit||'ud'}</strong></div>})}</div></div>}
+ {tab==='mermas'&&<div className="grid"><div className="card"><h2>Registrar merma</h2><label>Artículo<select value={wasteItem} onChange={e=>setWasteItem(e.target.value)}><option value="">Seleccionar…</option>{data.masters.map(m=><option value={m.id} key={m.id}>{m.name}</option>)}</select></label><label>Cantidad<input type="number" step="0.01" value={wasteQty} onChange={e=>setWasteQty(e.target.value)}/></label><label>Motivo<input value={wasteReason} onChange={e=>setWasteReason(e.target.value)} placeholder="Rotura, caducidad, invitación…"/></label><button onClick={addWaste}>Registrar merma</button></div><div className="card"><h2>Historial de mermas</h2>{[...(state.waste||[])].sort((a,b)=>String(b.date).localeCompare(String(a.date))).slice(0,30).map(x=>{const m=data.masters.find(i=>String(i.id)===String(x.itemId));return <div className="inventoryHistory" key={x.id}><div><b>{m?.name||'Artículo'}</b><small>{x.reason} · {new Date(x.date).toLocaleDateString('es-ES')}</small></div><strong>-{Number(x.qty).toFixed(2)} {m?.base_unit||'ud'}</strong></div>})}</div></div>}
+ {tab==='pedido'&&<div className="card"><div className="row between"><div><h2>Pedido recomendado</h2><p>Calculado con consumo medio de los últimos 30 días.</p></div><div className="row"><label className="inventoryDays">Cobertura<input type="number" min="1" max="30" value={days} onChange={e=>setDays(e.target.value)}/> días</label><button onClick={exportOrder}>Exportar pedido CSV</button></div></div><div className="tableScroll"><table><thead><tr><th>Artículo</th><th>Stock</th><th>Mínimo</th><th>Consumo/día</th><th>Cobertura</th><th>Comprar</th><th>Coste estimado</th></tr></thead><tbody>{rows.filter(r=>r.recommended>0).sort((a,b)=>b.recommended-a.recommended).map(r=><tr key={r.id}><td><b>{r.name}</b></td><td>{r.theoretical.toFixed(2)} {r.base_unit||'ud'}</td><td>{r.min.toFixed(2)}</td><td>{r.daily.toFixed(2)}</td><td className={r.coverage<2?'bad':''}>{r.coverage===999?'—':`${r.coverage.toFixed(1)} días`}</td><td><b>{r.recommended.toFixed(2)} {r.base_unit||'ud'}</b></td><td>{money(r.recommended*Number(r.manual_unit_cost||0))}</td></tr>)}</tbody></table></div>{!rows.some(r=>r.recommended>0)&&<div className="alertOk">No es necesario realizar pedidos con la configuración actual.</div>}</div>}
+ </div>
+}
+
 function Settings(){
  const[settings,setSettings]=useState(null);
  const[runtime,setRuntime]=useState([]);
  const[runtimeError,setRuntimeError]=useState('');
+ const[tab,setTab]=useState('resumen');
+ const[geo,setGeo]=useState({loading:false,message:'',ok:null,distance:null});
+ const[systemCheck,setSystemCheck]=useState({loading:false,supabase:null,message:''});
+ const[advanced,setAdvanced]=useState(false);
+ const[prefs,setPrefs]=useState(()=>parseJSON(localStorage.getItem('colibri_system_preferences'),{
+  business_name:'Brasería El Colibrí',business_address:'Av. Carlos V, local 3',business_phone:'',
+  labour_cost_hour:7,monthly_sales_goal:0,vat_rate:10,currency:'EUR',punctuality_grace:5,
+  late_alert_minutes:10,max_open_clock_hours:12,gps_enabled:true,qr_enabled:true,
+  allow_remote_clockout:false,manager_incident_confirmation:true
+ }));
+ const fileRef=useRef(null);
+ useEffect(()=>{localStorage.setItem('colibri_system_preferences',JSON.stringify(prefs))},[prefs]);
  useEffect(()=>{
-  supabase?.from('settings').select('*').single().then(({data})=>setSettings(data));
+  supabase?.from('settings').select('*').single().then(({data,error})=>{if(data)setSettings(data);else if(error)setRuntimeError(error.message)});
   loadRuntime();
   const t=setInterval(loadRuntime,15000);
   return()=>clearInterval(t);
@@ -1077,52 +1147,140 @@ function Settings(){
   if(error){setRuntimeError(error.message);return}
   setRuntime(data||[]);setRuntimeError('');
  }
- async function save(){const{error}=await supabase.from('settings').upsert(settings);if(error)alert(error.message);else alert('Guardado')}
+ async function save(){
+  const clean={...settings,bar_lat:Number(settings.bar_lat),bar_lng:Number(settings.bar_lng),gps_radius_m:Number(settings.gps_radius_m)};
+  const{error}=await supabase.from('settings').upsert(clean);
+  if(error)alert(error.message);else{setSettings(clean);alert('Ajustes guardados correctamente')}
+ }
+ function haversine(lat1,lon1,lat2,lon2){const R=6371000,toRad=x=>x*Math.PI/180;const dLat=toRad(lat2-lat1),dLon=toRad(lon2-lon1);const a=Math.sin(dLat/2)**2+Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)**2;return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a))}
+ function testLocation(){
+  if(!navigator.geolocation){setGeo({loading:false,message:'Este dispositivo no permite obtener la ubicación.',ok:false,distance:null});return}
+  setGeo({loading:true,message:'Obteniendo ubicación…',ok:null,distance:null});
+  navigator.geolocation.getCurrentPosition(pos=>{const distance=haversine(pos.coords.latitude,pos.coords.longitude,Number(settings.bar_lat),Number(settings.bar_lng));const ok=distance<=Number(settings.gps_radius_m||75);setGeo({loading:false,distance,message:`Estás a ${Math.round(distance)} metros del local. El fichaje ${ok?'estaría permitido':'quedaría fuera del radio autorizado'}.`,ok})},err=>setGeo({loading:false,message:`No se pudo obtener la ubicación: ${err.message}`,ok:false,distance:null}),{enableHighAccuracy:true,timeout:15000,maximumAge:0});
+ }
+ function useCurrentLocation(){
+  if(!navigator.geolocation)return alert('Este dispositivo no permite obtener la ubicación');
+  navigator.geolocation.getCurrentPosition(pos=>{setSettings(v=>({...v,bar_lat:pos.coords.latitude.toFixed(7),bar_lng:pos.coords.longitude.toFixed(7)}));alert('Ubicación actual cargada. Pulsa Guardar para confirmarla.')},err=>alert(err.message),{enableHighAccuracy:true,timeout:15000});
+ }
+ async function checkSystem(){
+  setSystemCheck({loading:true,supabase:null,message:'Comprobando…'});
+  const started=Date.now();
+  try{const{error}=await supabase.from('settings').select('id').limit(1);if(error)throw error;setSystemCheck({loading:false,supabase:true,message:`Supabase conectado · ${Date.now()-started} ms`})}catch(e){setSystemCheck({loading:false,supabase:false,message:e.message||String(e)})}
+ }
  const guardian=runtime.find(x=>x.status_key==='guardian');
  const sync=runtime.find(x=>x.status_key==='sync');
  const age=(date)=>date?Math.max(0,Math.floor((Date.now()-new Date(date).getTime())/1000)):99999;
- const guardianOnline=guardian&&age(guardian.heartbeat_at)<120;
- const syncOnline=sync&&age(sync.heartbeat_at)<150;
- const statusClass=v=>v?'runtimeOk':'runtimeBad';
- if(!settings)return <div className="card">Cargando...</div>;
- return <div className="settingsPage">
-  <div className="card">
-   <h2>Configuración</h2>
-   <label>Latitud<input value={settings.bar_lat} onChange={e=>setSettings({...settings,bar_lat:e.target.value})}/></label>
-   <label>Longitud<input value={settings.bar_lng} onChange={e=>setSettings({...settings,bar_lng:e.target.value})}/></label>
-   <label>Radio metros<input value={settings.gps_radius_m} onChange={e=>setSettings({...settings,gps_radius_m:e.target.value})}/></label>
-   <button onClick={save}>Guardar</button>
-  </div>
-  <div className="card runtimePanel">
-   <div className="row between">
-    <div><h2>Colibrí Sync Guardian</h2><p>Estado del TPV y la sincronización en este restaurante.</p></div>
-    <button onClick={loadRuntime}>Actualizar estado</button>
+ const guardianOnline=Boolean(guardian&&age(guardian.heartbeat_at)<120);
+ const syncOnline=Boolean(sync&&age(sync.heartbeat_at)<150);
+ const numierOnline=Boolean(guardian?.numier_running);
+ const everythingOk=guardianOnline&&syncOnline&&numierOnline;
+ const systemState=everythingOk?'Todo operativo':guardianOnline||syncOnline?'Requiere atención':'Sin contacto con el equipo del bar';
+ const systemTone=everythingOk?'ok':guardianOnline||syncOnline?'warn':'bad';
+ const diagnostics={generated_at:new Date().toISOString(),erp_version:'Configuración 8.2',url:location.href,user_agent:navigator.userAgent,online:navigator.onLine,guardian, sync, runtime_error:runtimeError,settings:{bar_lat:settings?.bar_lat,bar_lng:settings?.bar_lng,gps_radius_m:settings?.gps_radius_m},preferences:prefs};
+ async function copyDiagnostic(){try{await navigator.clipboard.writeText(JSON.stringify(diagnostics,null,2));alert('Diagnóstico copiado') }catch{alert('No se pudo copiar el diagnóstico')}}
+ function exportConfig(){downloadFile(`COLIBRI_CONFIG_${today()}.json`,new Blob([JSON.stringify({settings,prefs},null,2)],{type:'application/json'}),'application/json')}
+ function importConfig(e){const file=e.target.files?.[0];if(!file)return;const reader=new FileReader();reader.onload=()=>{try{const data=JSON.parse(reader.result);if(data.settings)setSettings(v=>({...v,...data.settings}));if(data.prefs)setPrefs(v=>({...v,...data.prefs}));alert('Configuración importada. Revisa y pulsa Guardar.') }catch{alert('El archivo no es una configuración válida')}};reader.readAsText(file);e.target.value=''}
+ function clearSystemCache(){if(!confirm('Se limpiará únicamente la caché de diagnóstico y configuración visual. No se borrarán cuadrantes, fichajes ni datos de Supabase.'))return;Object.keys(localStorage).filter(k=>k.startsWith('colibri_system_cache_')).forEach(k=>localStorage.removeItem(k));sessionStorage.clear();alert('Caché técnica limpiada')}
+ function showRecovery(){alert('Para recuperar el servicio en el PC del bar:\n\n1. Comprueba que NUMIER está abierto.\n2. Abre Colibri Sync o el acceso directo conjunto.\n3. Espera 60 segundos y pulsa Actualizar estado.\n\nEl reinicio remoto se activará cuando Guardian permita recibir órdenes desde el ERP.')}
+ const tabs=[['resumen','Resumen'],['fichajes','Fichajes y ubicación'],['sistema','Estado del sistema'],['negocio','Negocio'],['mantenimiento','Mantenimiento']];
+ if(!settings)return <div className="card">Cargando ajustes…</div>;
+ return <div className="settings82">
+  <div className="card settingsHero"><div><span className="sectionEyebrow">CONFIGURACIÓN 8.2</span><h1>Ajustes y sistema</h1><p>Ubicación de fichaje, diagnóstico del TPV y preferencias generales del negocio.</p></div><div className={`systemPill ${systemTone}`}><span>{everythingOk?'●':'▲'}</span><div><b>{systemState}</b><small>{sync?.heartbeat_at?`Último contacto ${secondsAgo(sync.heartbeat_at)}`:'Sin datos recientes'}</small></div></div></div>
+  <nav className="settingsTabs">{tabs.map(([v,l])=><button key={v} className={tab===v?'active':''} onClick={()=>setTab(v)}>{l}</button>)}</nav>
+
+  {tab==='resumen'&&<>
+   <div className="settingsSummaryGrid">
+    <button className="settingsSummaryCard" onClick={()=>setTab('fichajes')}><span>📍</span><div><small>Ubicación de fichaje</small><b>{prefs.business_address||'Dirección no indicada'}</b><em>Radio autorizado: {settings.gps_radius_m||75} m</em></div></button>
+    <button className="settingsSummaryCard" onClick={()=>setTab('sistema')}><span>{everythingOk?'🟢':'🔴'}</span><div><small>Estado del sistema</small><b>{systemState}</b><em>{guardian?.equipment_name||guardian?.machine_name||sync?.machine_name||'Equipo sin identificar'}</em></div></button>
+    <button className="settingsSummaryCard" onClick={()=>setTab('negocio')}><span>🏪</span><div><small>Negocio</small><b>{prefs.business_name}</b><em>IVA {prefs.vat_rate}% · Personal {money(prefs.labour_cost_hour)}/h</em></div></button>
+    <button className="settingsSummaryCard" onClick={()=>setTab('mantenimiento')}><span>🛠️</span><div><small>Mantenimiento</small><b>Diagnóstico y copias</b><em>ERP v{document.querySelector('meta[name="app-version"]')?.content||'4.1.0'}</em></div></button>
    </div>
-   {runtimeError&&<div className="runtimeWarn">Ejecuta el SQL RC 3.9.3 para activar el diagnóstico: {runtimeError}</div>}
-   <div className="runtimeGrid">
-    <div className={statusClass(guardianOnline)}><span>Guardian</span><b>{guardianOnline?'ACTIVO':'SIN CONTACTO'}</b><small>{guardian?.heartbeat_at?secondsAgo(guardian.heartbeat_at):'Sin datos'}</small></div>
-    <div className={statusClass(Boolean(guardian?.numier_running))}><span>NUMIER</span><b>{guardian?.numier_running?'EJECUTÁNDOSE':'DETENIDO'}</b><small>{guardian?.equipment_name||guardian?.machine_name||'-'}</small></div>
-    <div className={statusClass(Boolean(guardian?.sync_running||syncOnline))}><span>Colibrí Sync</span><b>{guardian?.sync_running||syncOnline?'ACTIVO':'DETENIDO'}</b><small>{sync?.version||guardian?.version||'-'}</small></div>
-    <div className={statusClass(syncOnline)}><span>Último heartbeat</span><b>{syncOnline?'ONLINE':'ATRASADO'}</b><small>{sync?.heartbeat_at?secondsAgo(sync.heartbeat_at):'Sin datos'}</small></div>
-   </div>
-   <div className="runtimeDetails">
-    <p><b>Equipo:</b> {guardian?.equipment_name||guardian?.machine_name||sync?.machine_name||'Sin identificar'}</p>
-    <p><b>Estado:</b> {guardian?.state||sync?.state||'Sin datos'}</p>
-    <p><b>Último reinicio Sync:</b> {guardian?.last_sync_restart_at?new Date(guardian.last_sync_restart_at).toLocaleString('es-ES'):'-'}</p>
-    <p><b>Último reinicio NUMIER:</b> {guardian?.last_numier_restart_at?new Date(guardian.last_numier_restart_at).toLocaleString('es-ES'):'-'}</p>
-    {(guardian?.last_error||sync?.last_error)&&<p className="runtimeError"><b>Último error:</b> {guardian?.last_error||sync?.last_error}</p>}
-   </div>
-  </div>
-  <div className="card qrprint"><h3>QR físico del bar</h3><p>Imprime este código y colócalo en zona de personal.</p><img src="/qr_bar_colibri.png"/></div>
+   <div className="grid settingsMainGrid"><div className="card"><h2>Acciones rápidas</h2><div className="settingsActionGrid"><button onClick={loadRuntime}>Actualizar estado</button><button onClick={testLocation}>Probar ubicación</button><button onClick={checkSystem}>Comprobar Supabase</button><button className="secondary" onClick={copyDiagnostic}>Copiar diagnóstico</button></div>{geo.message&&<div className={`settingsResult ${geo.ok===true?'ok':geo.ok===false?'bad':''}`}>{geo.message}</div>}{systemCheck.message&&<div className={`settingsResult ${systemCheck.supabase===true?'ok':systemCheck.supabase===false?'bad':''}`}>{systemCheck.message}</div>}</div>
+   <div className="card"><h2>Resumen técnico</h2><div className="settingsStatusList"><p><span>Guardian</span><b className={guardianOnline?'ok':'bad'}>{guardianOnline?'Activo':'Sin contacto'}</b></p><p><span>Numier</span><b className={numierOnline?'ok':'bad'}>{numierOnline?'En ejecución':'Detenido'}</b></p><p><span>Colibrí Sync</span><b className={syncOnline?'ok':'bad'}>{syncOnline?'Conectado':'Detenido'}</b></p><p><span>Última sincronización</span><b>{sync?.heartbeat_at?secondsAgo(sync.heartbeat_at):'Sin datos'}</b></p></div></div></div>
+  </>}
+
+  {tab==='fichajes'&&<div className="grid settingsMainGrid">
+   <div className="card"><span className="sectionEyebrow">UBICACIÓN DEL LOCAL</span><h2>Zona permitida para fichar</h2><p>Los empleados podrán fichar por GPS cuando estén dentro del radio configurado.</p><label>Dirección visible<input value={prefs.business_address} onChange={e=>setPrefs(v=>({...v,business_address:e.target.value}))} placeholder="Dirección del negocio"/></label><label>Radio permitido<select value={String(settings.gps_radius_m||75)} onChange={e=>setSettings(v=>({...v,gps_radius_m:Number(e.target.value)}))}><option value="50">50 metros</option><option value="75">75 metros</option><option value="100">100 metros</option><option value="150">150 metros</option></select></label><div className="settingsActionGrid"><button onClick={testLocation} disabled={geo.loading}>{geo.loading?'Localizando…':'Probar mi ubicación'}</button><button className="secondary" onClick={useCurrentLocation}>Usar ubicación actual como local</button></div>{geo.message&&<div className={`settingsResult ${geo.ok===true?'ok':geo.ok===false?'bad':''}`}>{geo.message}</div>}<button className="advancedToggle" onClick={()=>setAdvanced(v=>!v)}>{advanced?'Ocultar':'Mostrar'} coordenadas avanzadas</button>{advanced&&<div className="advancedCoordinates"><label>Latitud<input type="number" step="0.0000001" value={settings.bar_lat} onChange={e=>setSettings(v=>({...v,bar_lat:e.target.value}))}/></label><label>Longitud<input type="number" step="0.0000001" value={settings.bar_lng} onChange={e=>setSettings(v=>({...v,bar_lng:e.target.value}))}/></label></div>}<button onClick={save}>Guardar ubicación</button></div>
+   <div className="card"><span className="sectionEyebrow">REGLAS DE FICHAJE</span><h2>Seguridad y puntualidad</h2><div className="toggleList"><label><input type="checkbox" checked={prefs.gps_enabled} onChange={e=>setPrefs(v=>({...v,gps_enabled:e.target.checked}))}/><span><b>Permitir fichaje por GPS</b><small>Valida la distancia al local.</small></span></label><label><input type="checkbox" checked={prefs.qr_enabled} onChange={e=>setPrefs(v=>({...v,qr_enabled:e.target.checked}))}/><span><b>Permitir fichaje por QR</b><small>Usa el código físico situado en el bar.</small></span></label><label><input type="checkbox" checked={prefs.allow_remote_clockout} onChange={e=>setPrefs(v=>({...v,allow_remote_clockout:e.target.checked}))}/><span><b>Permitir cierre fuera del local</b><small>Debe quedar registrado como incidencia.</small></span></label><label><input type="checkbox" checked={prefs.manager_incident_confirmation} onChange={e=>setPrefs(v=>({...v,manager_incident_confirmation:e.target.checked}))}/><span><b>Confirmación del gerente</b><small>Obligatoria para fichajes con incidencias.</small></span></label></div><div className="settingsFieldGrid"><label>Minutos de cortesía<input type="number" min="0" value={prefs.punctuality_grace} onChange={e=>setPrefs(v=>({...v,punctuality_grace:Number(e.target.value)}))}/></label><label>Alerta de retraso<input type="number" min="1" value={prefs.late_alert_minutes} onChange={e=>setPrefs(v=>({...v,late_alert_minutes:Number(e.target.value)}))}/></label><label>Máximo turno abierto (h)<input type="number" min="1" value={prefs.max_open_clock_hours} onChange={e=>setPrefs(v=>({...v,max_open_clock_hours:Number(e.target.value)}))}/></label></div></div>
+   <div className="card qrprint"><h3>QR físico del bar</h3><p>Imprime este código y colócalo en la zona de personal.</p><img src="/qr_bar_colibri.png" alt="QR de fichaje del bar"/></div>
+  </div>}
+
+  {tab==='sistema'&&<div className="settingsSystemTab">
+   <div className="card runtimePanel"><div className="row between"><div><span className="sectionEyebrow">COLIBRÍ SYNC GUARDIAN</span><h2>Estado del TPV y sincronización</h2><p>Actualización automática cada 15 segundos.</p></div><button onClick={loadRuntime}>Actualizar estado</button></div>{runtimeError&&<div className="runtimeWarn">No se pudo leer el diagnóstico: {runtimeError}</div>}<div className="runtimeGrid"><div className={guardianOnline?'runtimeOk':'runtimeBad'}><span>Guardian</span><b>{guardianOnline?'ACTIVO':'SIN CONTACTO'}</b><small>{guardian?.heartbeat_at?secondsAgo(guardian.heartbeat_at):'Sin datos'}</small></div><div className={numierOnline?'runtimeOk':'runtimeBad'}><span>NUMIER</span><b>{numierOnline?'EJECUTÁNDOSE':'DETENIDO'}</b><small>{guardian?.equipment_name||guardian?.machine_name||'-'}</small></div><div className={syncOnline?'runtimeOk':'runtimeBad'}><span>Colibrí Sync</span><b>{syncOnline?'ACTIVO':'DETENIDO'}</b><small>{sync?.version||guardian?.version||'-'}</small></div><div className={syncOnline?'runtimeOk':'runtimeBad'}><span>Último contacto</span><b>{syncOnline?'ONLINE':'ATRASADO'}</b><small>{sync?.heartbeat_at?secondsAgo(sync.heartbeat_at):'Sin datos'}</small></div></div><div className="runtimeDetails"><p><b>Equipo:</b> {guardian?.equipment_name||guardian?.machine_name||sync?.machine_name||'Sin identificar'}</p><p><b>Estado:</b> {guardian?.state||sync?.state||'Sin datos'}</p><p><b>Versión:</b> {sync?.version||guardian?.version||'No comunicada'}</p><p><b>Último reinicio Sync:</b> {guardian?.last_sync_restart_at?new Date(guardian.last_sync_restart_at).toLocaleString('es-ES'):'-'}</p><p><b>Último reinicio NUMIER:</b> {guardian?.last_numier_restart_at?new Date(guardian.last_numier_restart_at).toLocaleString('es-ES'):'-'}</p>{(guardian?.last_error||sync?.last_error)&&<p className="runtimeError"><b>Último error:</b> {guardian?.last_error||sync?.last_error}</p>}</div><div className="settingsActionGrid"><button onClick={loadRuntime}>Actualizar estado</button><button className="danger" onClick={showRecovery}>Recuperar servicio</button><button className="secondary" onClick={copyDiagnostic}>Copiar diagnóstico</button></div></div>
+   <div className="card"><h2>Qué significa cada estado</h2><div className="systemHelp"><p><b>🟢 Todo operativo</b><span>Numier y Colibrí Sync están enviando datos con normalidad.</span></p><p><b>🟡 Requiere atención</b><span>Algún componente comunica, pero otro está detenido o atrasado.</span></p><p><b>🔴 Sin contacto</b><span>El equipo del bar no envía información. Puede estar apagado o Sync cerrado.</span></p></div></div>
+  </div>}
+
+  {tab==='negocio'&&<div className="grid settingsMainGrid"><div className="card"><span className="sectionEyebrow">DATOS GENERALES</span><h2>Configuración del negocio</h2><label>Nombre comercial<input value={prefs.business_name} onChange={e=>setPrefs(v=>({...v,business_name:e.target.value}))}/></label><label>Dirección<input value={prefs.business_address} onChange={e=>setPrefs(v=>({...v,business_address:e.target.value}))}/></label><label>Teléfono<input value={prefs.business_phone} onChange={e=>setPrefs(v=>({...v,business_phone:e.target.value}))}/></label><div className="settingsFieldGrid"><label>Coste medio empleado/h<input type="number" step="0.01" value={prefs.labour_cost_hour} onChange={e=>setPrefs(v=>({...v,labour_cost_hour:Number(e.target.value)}))}/></label><label>Objetivo mensual ventas<input type="number" step="1" value={prefs.monthly_sales_goal} onChange={e=>setPrefs(v=>({...v,monthly_sales_goal:Number(e.target.value)}))}/></label><label>IVA habitual (%)<input type="number" step="1" value={prefs.vat_rate} onChange={e=>setPrefs(v=>({...v,vat_rate:Number(e.target.value)}))}/></label><label>Moneda<select value={prefs.currency} onChange={e=>setPrefs(v=>({...v,currency:e.target.value}))}><option value="EUR">Euro (€)</option></select></label></div><div className="settingsResult ok">Los ajustes generales se guardan automáticamente en este navegador.</div></div><div className="card"><h2>Uso de estos datos</h2><div className="systemHelp"><p><b>Coste por hora</b><span>Se utilizará en simulaciones de personal y rentabilidad.</span></p><p><b>Objetivo mensual</b><span>Permitirá medir el progreso en Dashboard y Centro de Mando.</span></p><p><b>IVA habitual</b><span>Se aplicará como referencia en informes estimados.</span></p></div></div></div>}
+
+  {tab==='mantenimiento'&&<div className="grid settingsMainGrid"><div className="card"><span className="sectionEyebrow">DIAGNÓSTICO</span><h2>Comprobaciones del ERP</h2><div className="settingsStatusList"><p><span>Conexión del navegador</span><b className={navigator.onLine?'ok':'bad'}>{navigator.onLine?'Online':'Sin conexión'}</b></p><p><span>Supabase</span><b className={systemCheck.supabase===true?'ok':systemCheck.supabase===false?'bad':''}>{systemCheck.loading?'Comprobando':systemCheck.message||'Sin comprobar'}</b></p><p><span>Versión del proyecto</span><b>4.1.0 · Configuración 8.2</b></p><p><span>Entorno</span><b>{location.hostname}</b></p></div><div className="settingsActionGrid"><button onClick={checkSystem}>Comprobar conexión</button><button className="secondary" onClick={copyDiagnostic}>Copiar diagnóstico</button></div></div><div className="card"><span className="sectionEyebrow">COPIA Y RESTAURACIÓN</span><h2>Configuración</h2><p>Exporta los ajustes de este módulo para guardarlos o trasladarlos a otro dispositivo.</p><div className="settingsActionGrid"><button onClick={exportConfig}>Exportar configuración</button><button className="secondary" onClick={()=>fileRef.current?.click()}>Restaurar configuración</button><input ref={fileRef} type="file" accept="application/json" hidden onChange={importConfig}/></div><button className="danger fullButton" onClick={clearSystemCache}>Limpiar caché técnica</button><small>No se eliminan cuadrantes, fichajes, tickets ni información almacenada en Supabase.</small></div></div>}
  </div>
 }
 
+
+
+// COLIBRÍ IA 8.0 · asistente conversacional basado en datos reales del ERP
+function aiPct(current,base){return base?((current-base)/base)*100:current?100:0}
+function aiWords(text){return String(text||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'')}
+function aiSummary(tickets){const valid=(tickets||[]).filter(isRealSaleTicket);const total=valid.reduce((a,t)=>a+Number(t.total||0),0);const efectivo=valid.reduce((a,t)=>a+Number(t.efectivo||0),0);const tarjeta=valid.reduce((a,t)=>a+Number(t.tarjeta||0),0);return{total,tickets:valid.length,avg:valid.length?total/valid.length:0,efectivo,tarjeta}}
+function aiTopProducts(lines,costMap,limit=8){const map=new Map();(lines||[]).forEach(l=>{const f=lineFinancials(l,costMap);const key=f.code||String(l.descripcion||'Sin código');const row=map.get(key)||{code:key,name:f.info?.name||l.descripcion||key,qty:0,revenue:0,cost:0,known:0};row.qty+=f.qty;row.revenue+=f.revenue;if(f.known){row.cost+=f.cost;row.known+=f.revenue}map.set(key,row)});return[...map.values()].map(r=>({...r,profit:r.revenue-r.cost,margin:r.known?r.profit/r.revenue*100:null})).sort((a,b)=>b.revenue-a.revenue).slice(0,limit)}
+async function loadAIContext(){
+ const end=addDays(today(),1),from30=addDays(today(),-29),prevFrom=addDays(today(),-59),prevTo=from30;
+ const [todayData,yesterdayData,weekAgoData,monthData,prevMonthData,costMap,service,closure]=await Promise.all([
+  loadSalesRange(today(),end),loadSalesRange(addDays(today(),-1),today()),loadSalesRange(addDays(today(),-7),addDays(today(),-6)),loadSalesRange(from30,end),loadSalesRange(prevFrom,prevTo),loadProfitabilityCostMap(),loadServiceState(),loadCashClosure(today())
+ ]);
+ let clocks=[],employees=[],invoices=[];
+ if(supabase){
+  const start=today()+'T00:00:00';
+  const [c,e,i]=await Promise.all([
+   supabase.from('clock_records').select('*').gte('created_at',start).order('created_at',{ascending:true}).limit(1000),
+   supabase.from('employees').select('*').eq('active',true).limit(200),
+   supabase.from('purchase_invoices').select('id,status,total,invoice_date,invoice_number').order('invoice_date',{ascending:false}).limit(500)
+  ]);clocks=c.data||[];employees=e.data||[];invoices=i.data||[];
+ }
+ return{todayData,yesterdayData,weekAgoData,monthData,prevMonthData,costMap,service,closure,clocks,employees,invoices,loadedAt:new Date().toISOString()};
+}
+function buildAIAnswer(question,ctx){
+ const q=aiWords(question),t=aiSummary(ctx.todayData.tickets),y=aiSummary(ctx.yesterdayData.tickets),w=aiSummary(ctx.weekAgoData.tickets),m=aiSummary(ctx.monthData.tickets),pm=aiSummary(ctx.prevMonthData.tickets),fin=periodFinancials(ctx.monthData.lines,ctx.costMap),todayFin=periodFinancials(ctx.todayData.lines,ctx.costMap),tops=aiTopProducts(ctx.monthData.lines,ctx.costMap,12);const open=ctx.service?.open||[];
+ const pendingInvoices=(ctx.invoices||[]).filter(x=>!['confirmed','reviewed','approved','paid'].includes(String(x.status||'').toLowerCase()));
+ const openClock=new Map();(ctx.clocks||[]).forEach(r=>{const k=r.employee_id||r.employee_name;if(String(r.type).toLowerCase()==='entrada')openClock.set(k,r);else if(String(r.type).toLowerCase()==='salida')openClock.delete(k)});
+ const deltaY=aiPct(t.total,y.total),deltaW=aiPct(t.total,w.total),deltaM=aiPct(m.total,pm.total);
+ let title='Resumen del negocio',body='',facts=[],recommendations=[];
+ if(q.includes('efectivo')||q.includes('caja')){
+  title='Situación de caja de hoy';body=`Las ventas cobradas en efectivo suman ${money(t.efectivo)} y en tarjeta ${money(t.tarjeta)}. ${ctx.closure?'Existe un cierre de caja registrado para hoy.':'Todavía no consta un cierre de caja para hoy.'}`;facts=[`Ventas totales: ${money(t.total)}`,`Efectivo: ${money(t.efectivo)}`,`Tarjeta: ${money(t.tarjeta)}`,`Tickets: ${t.tickets}`];recommendations.push(ctx.closure?'Revisar que el cierre coincida con los cobros del TPV.':'Realizar el cierre al terminar el servicio y comprobar posibles descuadres.');
+ }else if(q.includes('producto')||q.includes('margen')||q.includes('rentab')){
+  const low=tops.filter(x=>x.margin!==null).sort((a,b)=>a.margin-b.margin).slice(0,5);title='Análisis de productos y rentabilidad';body=`En los últimos 30 días se han registrado ${money(m.total)} en ventas. El coste conocido asciende a ${money(fin.cost)} y el margen estimado es del ${fin.margin.toFixed(1)}%.`;
+  facts=tops.slice(0,5).map(x=>`${x.name}: ${money(x.revenue)} vendidos · ${x.margin===null?'coste sin configurar':`${x.margin.toFixed(1)}% de margen`}`);if(fin.unknownRevenue>0)recommendations.push(`Configurar costes para ${money(fin.unknownRevenue)} de ventas que todavía no tienen coste fiable.`);if(low.length)recommendations.push(`Revisar primero ${low[0].name}, que presenta el margen conocido más bajo (${low[0].margin.toFixed(1)}%).`);
+ }else if(q.includes('personal')||q.includes('empleado')||q.includes('turno')||q.includes('fichaje')){
+  title='Situación del personal';body=`Hay ${ctx.employees.length} empleados activos y ${openClock.size} fichajes actualmente abiertos.`;facts=[`Empleados activos: ${ctx.employees.length}`,`Fichajes abiertos: ${openClock.size}`,`Registros de fichaje hoy: ${ctx.clocks.length}`];recommendations.push(openClock.size?'Comprobar que los turnos abiertos correspondan a personal realmente trabajando.':'No aparecen fichajes abiertos pendientes en este momento.');
+ }else if(q.includes('atencion')||q.includes('alerta')||q.includes('problema')||q.includes('revisar')){
+  title='Qué requiere atención';const alerts=[];if(!ctx.closure)alerts.push('Hoy todavía no tiene cierre de caja');if(open.length)alerts.push(`${open.length} cuentas o mesas continúan abiertas`);if(pendingInvoices.length)alerts.push(`${pendingInvoices.length} facturas permanecen pendientes de revisión`);if(fin.unknownRevenue>0)alerts.push(`${money(fin.unknownRevenue)} de ventas de 30 días no tienen coste configurado`);if(openClock.size)alerts.push(`${openClock.size} fichajes siguen abiertos`);body=alerts.length?'He encontrado varios puntos que conviene revisar.':'No se detectan incidencias importantes con los datos disponibles.';facts=alerts.length?alerts:['Sin alertas críticas detectadas'];recommendations.push(alerts[0]||'Mantener la revisión diaria del Centro de Mando.');
+ }else if(q.includes('compar')||q.includes('ayer')||q.includes('semana')){
+  title='Comparación de ventas';body=`Hoy acumulas ${money(t.total)} en ${t.tickets} tickets. Frente a ayer la variación es ${deltaY>=0?'+':''}${deltaY.toFixed(1)}% y frente al mismo día de la semana anterior ${deltaW>=0?'+':''}${deltaW.toFixed(1)}%.`;facts=[`Hoy: ${money(t.total)} · ${t.tickets} tickets`,`Ayer: ${money(y.total)} · ${y.tickets} tickets`,`Hace 7 días: ${money(w.total)} · ${w.tickets} tickets`,`Ticket medio hoy: ${money(t.avg)}`];recommendations.push(deltaW<0?'La venta va por debajo del mismo día anterior; revisar la franja horaria y el número de tickets.':'El ritmo supera al mismo día de la semana pasada.');
+ }else{
+  title='Resumen ejecutivo de hoy';body=`Hoy se han vendido ${money(t.total)} en ${t.tickets} tickets, con un ticket medio de ${money(t.avg)}. El beneficio directo conocido del día es ${money(todayFin.profit)} y hay ${open.length} cuentas abiertas.`;facts=[`Ventas: ${money(t.total)}`,`Tickets: ${t.tickets}`,`Ticket medio: ${money(t.avg)}`,`Beneficio directo conocido: ${money(todayFin.profit)}`,`Mes móvil 30 días: ${money(m.total)} (${deltaM>=0?'+':''}${deltaM.toFixed(1)}% frente a los 30 días anteriores)`];if(!ctx.closure)recommendations.push('El cierre de caja de hoy aún no consta como registrado.');if(fin.unknownRevenue>0)recommendations.push('Completar costes pendientes mejorará la precisión del beneficio.');
+ }
+ return{id:Date.now(),question,title,body,facts,recommendations,createdAt:new Date().toISOString(),period:'Datos actualizados hasta '+new Date(ctx.loadedAt).toLocaleString('es-ES')};
+}
+function AIWhatsApp(answer){return `🤖 COLIBRÍ IA · ${answer.title}\n\n${answer.body}\n\n${answer.facts.map(x=>'• '+x).join('\n')}${answer.recommendations.length?'\n\nRECOMENDACIÓN\n'+answer.recommendations.map(x=>'• '+x).join('\n'):''}\n\n${answer.period}`}
+function BusinessAssistant(){
+ const[ctx,setCtx]=useState(null),[loading,setLoading]=useState(true),[question,setQuestion]=useState(''),[messages,setMessages]=useState(()=>{try{return JSON.parse(localStorage.getItem('colibri_ai8_history')||'[]')}catch{return[]}}),[error,setError]=useState('');
+ useEffect(()=>{refresh()},[]);useEffect(()=>{localStorage.setItem('colibri_ai8_history',JSON.stringify(messages.slice(-30)))},[messages]);
+ async function refresh(){try{setLoading(true);setError('');setCtx(await loadAIContext())}catch(e){setError(e.message||String(e))}finally{setLoading(false)}}
+ function ask(text=question){const clean=String(text||'').trim();if(!clean||!ctx)return;const answer=buildAIAnswer(clean,ctx);setMessages(v=>[...v,answer]);setQuestion('')}
+ async function copy(answer){const txt=AIWhatsApp(answer);try{await navigator.clipboard.writeText(txt);alert('Resumen copiado para WhatsApp')}catch{prompt('Copia el texto:',txt)}}
+ const quick=['Resumen de hoy','¿Qué requiere atención?','Compárame con ayer y la semana pasada','Analiza productos y rentabilidad','Revisa personal y fichajes','¿Cuánto efectivo debería tener hoy?'];
+ return <div className="ai8"><div className="card hero ai8Hero"><div><span className="sectionEyebrow">COLIBRÍ IA 8.0 · ASISTENTE DEL NEGOCIO</span><h2>Pregunta directamente por tu negocio</h2><p>Respuestas calculadas con ventas, costes, TPV, cierres, facturas y fichajes reales del ERP.</p></div><button onClick={refresh} disabled={loading}>{loading?'Actualizando…':'Actualizar datos'}</button></div>
+ {error&&<div className="alertBad">{error}</div>}<div className="ai8Quick">{quick.map(x=><button key={x} onClick={()=>ask(x)} disabled={!ctx||loading}>{x}</button>)}</div>
+ <div className="card ai8Composer"><textarea value={question} onChange={e=>setQuestion(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();ask()}}} placeholder="Ejemplo: ¿Por qué estoy vendiendo menos que la semana pasada?"/><button onClick={()=>ask()} disabled={!question.trim()||!ctx||loading}>Preguntar</button><small>Modo seguro: solo consulta y análisis. No modifica ningún dato del ERP.</small></div>
+ <div className="ai8Conversation">{!messages.length&&<div className="card ai8Welcome"><h2>Hola, Alfonso</h2><p>Selecciona una pregunta rápida o escribe lo que quieres saber. El asistente no inventa datos: cuando una cifra no está disponible, lo indicará.</p></div>}{messages.slice().reverse().map(a=><article className="card ai8Answer" key={a.id}><div className="ai8Question">Tú: {a.question}</div><div className="ai8AnswerHead"><div><span>COLIBRÍ IA</span><h2>{a.title}</h2></div><button onClick={()=>copy(a)}>Copiar WhatsApp</button></div><p className="ai8Body">{a.body}</p><div className="ai8Facts">{a.facts.map((x,i)=><div key={i}>{x}</div>)}</div>{a.recommendations.length>0&&<div className="ai8Recommendation"><b>Recomendación</b>{a.recommendations.map((x,i)=><p key={i}>{x}</p>)}</div>}<small>{a.period}</small></article>)}</div>
+ {messages.length>0&&<button className="ai8Clear" onClick={()=>{if(confirm('¿Borrar el historial del asistente?'))setMessages([])}}>Borrar historial</button>}</div>
+}
 
 class ModuleErrorBoundary extends React.Component{
  constructor(props){super(props);this.state={error:null}}
  static getDerivedStateFromError(error){return {error}}
  componentDidCatch(error,info){console.error('Error módulo',this.props.name,error,info)}
- render(){if(this.state.error)return <div className="card"><h2>⚠️ Error en {this.props.name}</h2><p>El módulo ha fallado, pero el ERP sigue operativo.</p><pre style={{whiteSpace:'pre-wrap'}}>{String(this.state.error?.message||this.state.error)}</pre><button onClick={()=>{localStorage.removeItem('colibriSchedule');localStorage.removeItem('colibriScheduleEmployees');this.setState({error:null});location.reload()}}>Reiniciar datos locales del cuadrante</button></div>;return this.props.children}
+ render(){if(this.state.error)return <div className="card"><h2>⚠️ Error en {this.props.name}</h2><p>El módulo ha fallado, pero el ERP sigue operativo.</p><pre style={{whiteSpace:'pre-wrap'}}>{String(this.state.error?.message||this.state.error)}</pre><button onClick={()=>{if(this.props.name==='almacen'){localStorage.removeItem('colibri_inventory_v7')}else{localStorage.removeItem('colibriSchedule');localStorage.removeItem('colibriScheduleEmployees')}this.setState({error:null});location.reload()}}>Reiniciar datos locales de {this.props.name==='almacen'?'almacén':'cuadrante'}</button></div>;return this.props.children}
 }
 
 function App(){const host=location.hostname;const onlyClock=host.startsWith('fichar.')||location.pathname.includes('fichar');const [authed,setAuthed]=useState(false);return <>{onlyClock?<PeoplePortal supabase={supabase} Brand={Brand}/>:<>{!authed?<Login onOk={()=>setAuthed(true)}/>:<Manager/>}</>}</>}
@@ -1131,11 +1289,11 @@ function Brand(){return <div className="brand"><div className="brandMark"><img s
 function Manager(){
  const initial=history.state?.colibriRoute||{tab:'dashboard',section:null,payload:null};
  const[route,setRoute]=useState(initial);
- const tabs=[['dashboard','⌂','Dashboard'],['servicio','◉','Centro mando'],['inteligencia','✦','Inteligencia'],['tpv','▣','TPV'],['gestoria','▤','Gestoría'],['rentabilidad','€','Rentabilidad'],['empleados','♟','Empleados'],['fichajes','◷','Fichajes'],['cuadrantes','▦','Cuadrantes'],['comparador','⇄','Comparador'],['config','⚙','Configuración']];
+ const tabs=[['dashboard','⌂','Dashboard'],['servicio','◉','Centro mando'],['inteligencia','✦','Inteligencia'],['tpv','▣','TPV'],['gestoria','▤','Gestoría'],['rentabilidad','€','Rentabilidad'],['almacen','▥','Almacén'],['asistente','✧','IA del negocio'],['empleados','♟','Empleados'],['fichajes','◷','Fichajes'],['cuadrantes','▦','Cuadrantes'],['comparador','⇄','Comparador'],['config','⚙','Configuración']];
  useEffect(()=>{const onPop=e=>setRoute(e.state?.colibriRoute||{tab:'dashboard',section:null,payload:null});addEventListener('popstate',onPop);return()=>removeEventListener('popstate',onPop)},[]);
  function navigate(tab,section=null,payload=null,{replace=false}={}){const next={tab,section,payload};setRoute(next);const fn=replace?'replaceState':'pushState';history[fn]({...(history.state||{}),colibriRoute:next},'',location.href);requestAnimationFrame(()=>scrollTo({top:0,behavior:'smooth'}));}
  const tab=route.tab;
- return <div className="erpShell"><aside className="erpSidebar"><Brand/><nav className="sideNav">{tabs.map(([id,icon,label])=><button className={tab===id?'active':''} onClick={()=>navigate(id)} key={id}><span>{icon}</span><b>{label}</b></button>)}</nav><div className="sidebarFooter"><div className="userAvatar">A</div><div><b>Alfonso</b><small>Gerencia</small></div></div></aside><main className="erpMain"><div className="mobileTop"><Brand/></div><section className="page"><ModuleErrorBoundary key={`${tab}-${route.section||''}-${JSON.stringify(route.payload||{})}`} name={tab}>{tab==='dashboard'&&<Dashboard onNavigate={navigate}/>} {tab==='servicio'&&<CommandCenter initialView={route.section||'plano'} focusAccount={route.payload}/>} {tab==='inteligencia'&&<BusinessIntelligence/>}{tab==='empleados'&&<Employees/>}{tab==='fichajes'&&<ClockPanel/>}{tab==='cuadrantes'&&<Schedule/>}{tab==='comparador'&&<Compare/>}{tab==='tpv'&&<TPV/>}{tab==='gestoria'&&<Gestoria/>}{tab==='rentabilidad'&&<Profitability/>}{tab==='config'&&<Settings/>}</ModuleErrorBoundary></section></main></div>}
+ return <div className="erpShell"><aside className="erpSidebar"><Brand/><nav className="sideNav">{tabs.map(([id,icon,label])=><button className={tab===id?'active':''} onClick={()=>navigate(id)} key={id}><span>{icon}</span><b>{label}</b></button>)}</nav><div className="sidebarFooter"><div className="userAvatar">A</div><div><b>Alfonso</b><small>Gerencia</small></div></div></aside><main className="erpMain"><div className="mobileTop"><Brand/></div><section className="page"><ModuleErrorBoundary key={`${tab}-${route.section||''}-${JSON.stringify(route.payload||{})}`} name={tab}>{tab==='dashboard'&&<Dashboard onNavigate={navigate}/>} {tab==='servicio'&&<CommandCenter initialView={route.section||'plano'} focusAccount={route.payload}/>} {tab==='inteligencia'&&<BusinessIntelligence/>}{tab==='empleados'&&<Employees/>}{tab==='fichajes'&&<ClockPanel/>}{tab==='cuadrantes'&&<Schedule/>}{tab==='comparador'&&<Compare/>}{tab==='tpv'&&<TPV/>}{tab==='gestoria'&&<Gestoria/>}{tab==='rentabilidad'&&<Profitability/>}{tab==='almacen'&&<Inventory/>}{tab==='asistente'&&<BusinessAssistant/>}{tab==='config'&&<Settings/>}</ModuleErrorBoundary></section></main></div>}
 
 function getGreeting(){const h=new Date().getHours();if(h<12)return 'Buenos días';if(h<20)return 'Buenas tardes';return 'Buenas noches'}
 function pctDiff(a,b){a=Number(a||0);b=Number(b||0);if(!b)return null;return ((a-b)/b)*100}
@@ -1301,43 +1459,8 @@ function ClockPage(){
  {tab==='perfil'&&<><div className="employeeCard profileCard"><div className="profileAvatar">{user.name?.[0]||'E'}</div><h2>{user.name}</h2><p>Empleado activo · Acceso personal</p><button onClick={notifications}>Activar notificaciones</button></div><div className="employeeCard"><h2>Cambiar mi PIN</h2><p>El PIN debe ser personal. Gerencia siempre podrá verlo, restablecerlo o bloquear tu acceso.</p><label>PIN actual<input type="password" inputMode="numeric" value={oldPin} onChange={e=>setOldPin(e.target.value)}/></label><label>Nuevo PIN<input type="password" inputMode="numeric" value={newPin} onChange={e=>setNewPin(e.target.value)}/></label><button className="employeePrimary" onClick={changePin}>Guardar nuevo PIN</button></div><div className="employeeCard"><h2>Mis solicitudes</h2>{requests.length===0?<p>No tienes solicitudes registradas.</p>:requests.map(r=><div className="requestRow" key={r.id}><span><b>{r.request_type==='salida_olvidada'?'Salida olvidada':'Corrección'}</b><small>{new Date(r.proposed_at||r.created_at).toLocaleString('es-ES')}</small></span><em className={r.status}>{r.status}</em></div>)}</div></>}
  </section>{requestOpen&&<div className="employeeModal"><div><button className="modalClose" onClick={()=>setRequestOpen(false)}>×</button><span className="welcomePill">Solicitud a gerencia</span><h2>Olvidé fichar la salida</h2><p>No pasa nada. Indica la hora real y cuéntanos qué ocurrió. No sumará hasta que gerencia la apruebe.</p><label>Hora aproximada<input type="time" value={requestTime} onChange={e=>setRequestTime(e.target.value)}/></label><label>Motivo<textarea value={requestReason} onChange={e=>setRequestReason(e.target.value)} placeholder="Ej.: Se me olvidó fichar al terminar de cerrar la caja."/></label><button className="employeePrimary" onClick={submitRequest}>Enviar para revisión</button></div></div>}</main>
 }
-function ClockPanel(){
- const[rows,setRows]=useState([]);const[open,setOpen]=useState([]);const[scheduleWeeks,setScheduleWeeks]=useState({});const[loading,setLoading]=useState(false);
- useEffect(()=>{load()},[]);
- async function load(){
-  if(!supabase)return;setLoading(true);
-  const{data,error}=await supabase.from('clock_records').select('*').order('created_at',{ascending:false}).limit(500);
-  if(error){setLoading(false);alert(error.message);return}
-  const list=data||[];setRows(list);
-  const latest=new Map();list.forEach(r=>{const key=clockPersonKey(r.employee_id||r.employee_name);if(!latest.has(key))latest.set(key,r)});
-  setOpen([...latest.values()].filter(r=>String(r.type).toLowerCase()==='entrada'));
-  const weekIds=[...new Set(list.map(r=>clockWeekId(r.created_at)).filter(Boolean))];
-  if(weekIds.length){
-   const{data:schedules,error:scheduleError}=await supabase.from('work_schedule_weeks').select('week_id,data,employees,revision,updated_at').eq('restaurant_id','colibri').in('week_id',weekIds);
-   if(scheduleError)console.warn('No se pudo cargar el cuadrante para fichajes',scheduleError);
-   const map={};(schedules||[]).forEach(s=>map[s.week_id]=s);setScheduleWeeks(map);
-  }else setScheduleWeeks({});
-  setLoading(false);
- }
- async function closeManual(r){
-  const now=new Date();const suggested=new Date(now-now.getTimezoneOffset()*60000).toISOString().slice(0,16);
-  const value=prompt(`Hora de salida real para ${r.employee_name} (formato YYYY-MM-DDTHH:mm)`,suggested);if(!value)return;
-  const reason=prompt('Motivo del cierre manual','Olvido de fichaje')||'Cierre manual por manager';const exitIso=new Date(value).toISOString();
-  const {error}=await supabase.from('clock_records').insert({employee_id:r.employee_id,employee_name:r.employee_name,type:'salida',method:'manual',inside_radius:true,note:`SALIDA MANUAL POR MANAGER · ${reason}`,created_at:exitIso});
-  if(error){alert(error.message);return}alert('Turno cerrado manualmente');load();
- }
- const decorated=rows.map(r=>{const assignment=scheduleAssignmentFor(r,scheduleWeeks);return {...r,assignment,punctuality:punctualityFor(r,assignment)}});
- const entradaRows=decorated.filter(r=>String(r.type).toLowerCase()==='entrada');const late5=entradaRows.filter(r=>r.punctuality.cls==='late5').length;const late10=entradaRows.filter(r=>r.punctuality.cls==='late10').length;const matched=entradaRows.filter(r=>r.assignment).length;
- return <div className="clockPanelPro">
-  <div className="card clockOpenCard">
-   <div className="clockSectionHead"><div><span className="sectionEyebrow">Control en tiempo real</span><h2>Fichajes abiertos</h2><p>{open.length} {open.length===1?'turno abierto':'turnos abiertos'} ahora mismo</p></div><button onClick={load} disabled={loading}>{loading?'Actualizando…':'Actualizar'}</button></div>
-   {open.length===0&&<div className="clockEmpty">✅ No hay turnos abiertos.</div>}
-   <div className="clockOpenList">{open.map(r=>{const a=scheduleAssignmentFor(r,scheduleWeeks);return <article className="clockOpenItem" key={r.id}><div className="clockEmployeeMain"><b>{r.employee_name}</b><span>Entrada · {new Date(r.created_at).toLocaleString('es-ES')}</span><small>{a?`Cuadrante: ${a.day} ${a.label}`:'⚠️ No aparece asignado en el cuadrante de esa semana'}</small></div><div className="clockDuration"><b>{Math.max(0,((Date.now()-new Date(r.created_at))/3600000)).toFixed(1)} h</b><span>abierto</span></div><button className="red clockCloseButton" onClick={()=>closeManual(r)}>Cerrar turno</button></article>})}</div>
-  </div>
-  <div className="card clockStatsCard"><span className="sectionEyebrow">Cruce automático con Supabase</span><h2>Puntualidad</h2><div className="clockStatGrid"><article><b>{matched}</b><span>Entradas con turno localizado</span></article><article><b>{late5}</b><span>Retrasos de 6 a 10 min</span></article><article><b>{late10}</b><span>Alertas de más de 10 min</span></article></div><div className="clockLegend"><span>🟢 Puntual</span><span>🔵 Antes de hora</span><span>🟡 +5 min</span><span>⚠️ +10 min</span><span>🔴 Salida</span></div><p className="mutedText">Cada fichaje se compara con el cuadrante compartido de Supabase correspondiente a su fecha, semana, empleado y franja.</p></div>
-  <div className="card wide clockHistoryCard"><div className="clockSectionHead"><div><span className="sectionEyebrow">Registro verificable</span><h2>Historial de fichajes</h2></div><span className="clockCount">{Math.min(160,decorated.length)} registros</span></div><div className="clockHistoryList">{decorated.slice(0,160).map(r=><article key={r.id} className={'clockHistoryItem '+r.punctuality.cls}><div className="clockHistoryWhen"><b>{new Date(r.created_at).toLocaleDateString('es-ES')}</b><span>{new Date(r.created_at).toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit',second:'2-digit'})}</span></div><div className="clockHistoryPerson"><b>{r.employee_name}</b><span>{r.punctuality.icon} {r.punctuality.label}</span></div><div className="clockHistoryMeta"><span className={'clockType '+String(r.type).toLowerCase()}>{String(r.type).toUpperCase()}</span><small>{String(r.method||'').toUpperCase()}{r.distance_m?` · ${Math.round(r.distance_m)} m`:''}</small></div>{r.note&&<div className="clockHistoryNote">{r.note}</div>}</article>)}</div></div>
- </div>
-}
+function ClockPanel(){const[rows,setRows]=useState([]);const[open,setOpen]=useState([]);useEffect(()=>{load()},[]);async function load(){if(!supabase)return;const{data,error}=await supabase.from('clock_records').select('*').order('created_at',{ascending:false}).limit(500);if(error){alert(error.message);return}const list=data||[];setRows(list);const latest=new Map();list.forEach(r=>{if(!latest.has(r.employee_id||r.employee_name))latest.set(r.employee_id||r.employee_name,r)});setOpen([...latest.values()].filter(r=>r.type==='entrada'))}async function closeManual(r){const now=new Date();const suggested=now.toISOString().slice(0,16);const value=prompt(`Hora de salida real para ${r.employee_name} (formato YYYY-MM-DDTHH:mm)`,suggested);if(!value)return;const reason=prompt('Motivo del cierre manual','Olvido de fichaje')||'Cierre manual por manager';const exitIso=new Date(value).toISOString();const {error}=await supabase.from('clock_records').insert({employee_id:r.employee_id,employee_name:r.employee_name,type:'salida',method:'manual',inside_radius:true,note:`SALIDA MANUAL POR MANAGER · ${reason}`,created_at:exitIso});if(error){alert(error.message);return}alert('Turno cerrado manualmente');load()}const expected=expectedStartMapToday();const entradaRows=rows.filter(r=>String(r.type).toLowerCase()==='entrada');const late5=entradaRows.filter(r=>punctualityFor(r,expected).cls==='late5').length;const late10=entradaRows.filter(r=>punctualityFor(r,expected).cls==='late10').length;return <div className="grid"><div className="card"><h2>Fichajes abiertos</h2><button onClick={load}>Actualizar</button>{open.length===0&&<p>✅ No hay turnos abiertos.</p>}{open.map(r=><div className="employee" key={r.id}><b>{r.employee_name}</b><span>Entrada: {new Date(r.created_at).toLocaleString()}</span><span>{Math.max(0,((Date.now()-new Date(r.created_at))/3600000)).toFixed(1)} h abierto</span><button className="red" onClick={()=>closeManual(r)}>Cerrar turno</button></div>)}</div><div className="card"><h2>Puntualidad</h2><p>🟢 Puntual · 🟡 +5 min · ⚠️ +10 min · 🔴 Salida</p><p>Entradas amarillas: <b>{late5}</b></p><p>Alertas +10 min: <b>{late10}</b></p><p className="mutedText">La puntualidad se compara con el cuadrante semanal guardado en este navegador.</p></div><div className="card wide"><h2>Historial de fichajes</h2><table><tbody>{rows.slice(0,160).map(r=>{const p=punctualityFor(r,expected);return <tr key={r.id} className={'clockRow '+p.cls}><td>{new Date(r.created_at).toLocaleString()}</td><td>{r.employee_name}</td><td>{p.icon} {p.label}</td><td>{r.type}</td><td>{r.method}</td><td>{r.note||''}</td><td>{r.distance_m?Math.round(r.distance_m)+' m':''}</td></tr>})}</tbody></table></div></div>}
+
 
 function paymentLabel(t){const p=String(t.forma_pago||'').toUpperCase();return p==='E'?'Efectivo':p==='T'?'Tarjeta':p==='A'?'Ambas':p==='CH'?'Cheque':p||'-'}
 function ticketStatusLabel(t){const e=String(t.estado||'C').toUpperCase();return e==='X'?'Anulado':e==='G'?'Gasto':e==='C'?'Cobrado':e}
