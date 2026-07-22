@@ -1,0 +1,13 @@
+HOTFIX VERCEL - profitabilityModel.js
+
+Se ha corregido la sintaxis inválida de:
+src/modules/profitability/profitabilityModel.js
+
+El error estaba en el cierre de la llamada map(), que dejaba una expresión JavaScript sin cerrar.
+El archivo corregido ha sido validado con: node --check
+
+Publicación recomendada:
+1. Sustituir el proyecto completo por este contenido, conservando la carpeta .git.
+2. Commit: Hotfix profitabilityModel syntax
+3. Push origin.
+4. Redeploy en Vercel sin usar la caché anterior si Vercel ofrece esa opción.
