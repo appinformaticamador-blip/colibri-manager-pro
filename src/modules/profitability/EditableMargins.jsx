@@ -1,0 +1,2 @@
+import React from 'react';
+export default function EditableMargins({masterItems=[],links=[]}){return <section className="panel"><h2>Márgenes editables</h2><p>Artículos: <b>{masterItems.length}</b> · Vinculaciones Numier: <b>{links.length}</b></p><div className="muted">Vista segura de márgenes disponible. La edición avanzada depende de las tablas de rentabilidad configuradas en Supabase.</div></section>}

@@ -1,0 +1,24 @@
+COLIBRÍ ERP 5.0 STABLE
+
+Proyecto completo corregido a partir del ZIP actual facilitado.
+
+CORRECCIONES REALIZADAS
+- Restaurado src/modules/people/PeoplePortal.jsx.
+- Restaurado src/modules/people/peopleUtils.js.
+- Restaurados los módulos de rentabilidad requeridos por src/App.jsx.
+- Verificados src/main.jsx y src/people-entry.jsx.
+- Verificados todos los imports locales de src: 0 rutas rotas.
+- Conservada la configuración Node 22.x para Vercel.
+
+PUBLICACIÓN
+1. Guarda una copia del repositorio actual.
+2. Mantén únicamente la carpeta oculta .git.
+3. Sustituye el resto por el contenido completo de este ZIP.
+4. GitHub Desktop: Commit to develop y Push origin.
+
+Commit recomendado:
+Colibri ERP 5.0 Stable - estructura e imports corregidos
+
+NOTA
+El error concreto de Vercel relacionado con PeoplePortal.jsx queda corregido porque
+el archivo y sus dependencias ya se incluyen en la ruta exacta requerida.

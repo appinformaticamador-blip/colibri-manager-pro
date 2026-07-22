@@ -1,0 +1,2 @@
+import React from 'react';
+export default function ProfessionalRecipes({recipes=[],recipeIngredients=[],masterItems=[]}){return <section className="panel"><h2>Escandallos profesionales</h2><p>Recetas: <b>{recipes.length}</b> · Ingredientes: <b>{recipeIngredients.length}</b> · Artículos: <b>{masterItems.length}</b></p><div className="muted">Módulo restaurado en la base estable. Los datos existentes se conservan.</div></section>}
