@@ -1,0 +1,17 @@
+COLIBRÍ ERP 4.2 — ARCHIVOS DE REEMPLAZO
+
+Sube cada archivo respetando exactamente su ruta:
+
+1) App.jsx                          -> raíz del repositorio
+2) styles.css                       -> raíz del repositorio
+3) src/App.jsx                      -> carpeta src
+4) src/styles.css                   -> carpeta src
+5) sql/COLIBRI_ERP_4_2_CENTRO_EMPLEADOS.sql -> carpeta sql (archivo nuevo)
+6) README_COLIBRI_ERP_4_2_CENTRO_EMPLEADOS.md -> raíz (documentación)
+
+No borres los demás archivos del repositorio.
+
+IMPORTANTE SUPABASE:
+Abre SQL Editor, copia el contenido de
+sql/COLIBRI_ERP_4_2_CENTRO_EMPLEADOS.sql
+y ejecútalo una sola vez.
