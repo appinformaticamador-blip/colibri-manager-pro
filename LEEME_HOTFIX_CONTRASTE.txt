@@ -1,0 +1,6 @@
+HOTFIX PERSONAL 4.3.1 — CONTRASTE
+
+Sustituye src/styles.css por el incluido.
+Si tu repositorio conserva styles.css en la raíz, sustitúyelo también.
+No modifica datos, empleados, fichajes ni cuadrantes.
+Corrige pestañas invisibles, cabeceras oscuras con texto oscuro, botones y formularios.

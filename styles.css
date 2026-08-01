@@ -777,3 +777,142 @@ body{padding:0!important;margin:0!important}
 /* COLIBRÍ ERP 4.2 · Centro de control de empleados */
 .employeesControl,.clockControl{display:grid;gap:18px}.employeeHero,.clockToolbar,.scheduleEmployeeHeader{display:flex;align-items:center;justify-content:space-between;gap:18px}.employeeHero p,.clockToolbar p,.scheduleEmployeeHeader p{margin:.35rem 0 0;color:#637086}.employeeCreate h3{margin-top:0}.employeeCards{display:grid;grid-template-columns:repeat(auto-fit,minmax(310px,1fr));gap:16px}.employeeProfile{background:#fff;border:1px solid #d6e5e8;border-radius:24px;padding:20px;box-shadow:0 10px 28px rgba(31,57,74,.06)}.employeeProfile.inactive{opacity:.65}.employeeProfile header{display:flex;align-items:center;gap:12px;flex-wrap:wrap}.employeeProfile header>div{flex:1}.employeeProfile h3{margin:0;color:#171f32;font-size:1.25rem}.employeeProfile header p{margin:4px 0;color:#657084}.employeeAvatar{width:48px;height:48px;border-radius:16px;color:#fff;display:grid;place-items:center;font-weight:900;font-size:1.35rem}.statusDot{font-size:.78rem;font-weight:800;padding:7px 10px;border-radius:999px;background:#eef2f3;color:#657084}.statusDot.working{background:#def7e8;color:#087a45}.employeeStats{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin:16px 0}.employeeStats div{background:#f5fafb;border-radius:14px;padding:11px}.employeeStats span{display:block;color:#687489;font-size:.78rem}.employeeStats b{display:block;margin-top:4px;color:#182033}.employeeProfile footer{display:flex;gap:9px}.openShift{background:#e9fbf3;color:#087a45;padding:10px 12px;border-radius:12px;font-weight:700}.employeeEditor{margin-top:16px;padding-top:16px;border-top:1px solid #dbe7e9;display:grid;grid-template-columns:1fr 1fr;gap:12px}.employeeEditor h4,.employeeEditor .row{grid-column:1/-1}.employeeEditor label{display:grid;gap:6px;color:#536075;font-weight:700}.employeeEditor input,.employeeEditor select{width:100%}.employeeEditor .checkLine{display:flex;align-items:center}.employeeEditor .checkLine input{width:auto}.clockKpis{display:grid;grid-template-columns:repeat(5,minmax(130px,1fr));gap:12px}.clockKpis article{background:#fff;border:1px solid #d6e5e8;border-radius:18px;padding:17px}.clockKpis span{display:block;color:#637086;font-weight:700}.clockKpis b{font-size:1.8rem;color:#079575}.openClockGrid{display:grid;gap:10px}.openClockGrid article{display:flex;justify-content:space-between;align-items:center;gap:15px;padding:14px;border-radius:16px;background:#f6fafb}.openClockGrid article>div{display:grid;gap:4px}.openClockGrid span{color:#657084}.openClockGrid strong{color:#079575}.clockHistory{display:grid}.clockHistoryRow{display:grid;grid-template-columns:minmax(190px,1.3fr) minmax(130px,.8fr) 90px 1.5fr;gap:12px;align-items:center;padding:13px 8px;border-bottom:1px solid #e2e8ea}.clockHistoryRow>div{display:grid}.clockHistoryRow span,.clockHistoryRow small{color:#667286}.scheduleEmployeeHeader{margin-bottom:14px}
 @media(max-width:760px){.employeeHero,.clockToolbar,.scheduleEmployeeHeader{align-items:stretch;flex-direction:column}.employeeHero button,.clockToolbar button,.scheduleEmployeeHeader button{width:100%}.employeeCards{grid-template-columns:1fr}.employeeEditor{grid-template-columns:1fr}.employeeEditor h4,.employeeEditor .row{grid-column:1}.clockKpis{grid-template-columns:1fr 1fr}.clockHistoryRow{grid-template-columns:1fr 1fr}.clockHistoryRow small{grid-column:1/-1}.openClockGrid article{align-items:stretch;flex-direction:column}.openClockGrid button{width:100%}}
+
+/* PERSONAL 4.3 · CENTRO UNIFICADO */
+.staffCenter{display:grid;gap:22px}.staffHero{display:flex;align-items:center;justify-content:space-between;gap:20px;background:linear-gradient(135deg,#fff,#f4fbfa)}.staffHero h2{margin:.25rem 0;font-size:clamp(1.8rem,4vw,3rem)}.staffHero p{margin:0;color:#667085}.staffHeroActions,.modalActions{display:flex;gap:12px;flex-wrap:wrap}.staffTabs{display:flex;gap:10px;overflow:auto;padding:8px;background:#eaf7f4;border-radius:22px;position:sticky;top:0;z-index:4}.staffTabs button{white-space:nowrap;background:#fff;color:#28246f;border:1px solid #d8e9e7}.staffTabs button.active{background:linear-gradient(135deg,#40aed5,#48b887);color:#fff}.staffFilters{display:flex;gap:12px;flex-wrap:wrap}.staffFilters select{min-width:220px}.staffKpis{display:grid;grid-template-columns:repeat(6,minmax(130px,1fr));gap:14px}.staffKpis article{background:#fff;border:1px solid #d9e8eb;border-radius:22px;padding:20px;box-shadow:0 8px 24px rgba(25,75,90,.06)}.staffKpis span{display:block;color:#667085;font-weight:700}.staffKpis b{display:block;margin-top:8px;color:#078b70;font-size:1.45rem}.staffGrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:18px}.staffCard{background:#fff;border:1px solid #d8e7ea;border-radius:26px;padding:20px;box-shadow:0 10px 28px rgba(22,68,85,.08)}.staffCard.inactive{opacity:.62}.staffCard header{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:14px}.staffCard h3{margin:0;color:#28246f;font-size:1.35rem}.staffCard p{margin:4px 0 0;color:#687487}.staffAvatar{display:grid;place-items:center;width:54px;height:54px;border-radius:18px;color:#fff;font-weight:900;font-size:1.4rem;box-shadow:inset 0 0 0 2px rgba(255,255,255,.45)}.staffAvatar.small{width:42px;height:42px;border-radius:14px}.staffCard em{font-style:normal;font-weight:800;padding:8px 12px;border-radius:999px;font-size:.85rem}.staffCard em.working{background:#e3f8ed;color:#08764e}.staffCard em.off{background:#f0f3f5;color:#67717f}.staffCardStats,.employeeDetailKpis{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin:18px 0}.staffCardStats div,.employeeDetailKpis article{background:#f5f8fa;border-radius:16px;padding:13px}.staffCardStats span,.employeeDetailKpis span{display:block;color:#718096;font-size:.82rem;font-weight:700}.staffCardStats b,.employeeDetailKpis b{display:block;margin-top:5px;color:#111827}.staffOpen{display:flex;justify-content:space-between;gap:12px;background:#e9faf4;color:#08765c;border-radius:16px;padding:13px;margin-bottom:14px}.staffCard footer{display:flex;gap:10px;flex-wrap:wrap}.staffPresenceList{display:grid;gap:10px}.staffPresenceList article{display:grid;grid-template-columns:auto minmax(150px,1.3fr) auto auto auto;align-items:center;gap:14px;padding:14px;border:1px solid #e1ecee;border-radius:18px}.staffPresenceList small,.staffPresenceList span{color:#667085}.punctualityBars{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-top:18px}.punctualityBars span{display:flex;justify-content:space-between;background:#f6f8fa;border-radius:14px;padding:12px}.staffHistory{display:grid}.staffHistory article{display:grid;grid-template-columns:minmax(160px,1.3fr) minmax(130px,.8fr) 100px minmax(120px,1fr);gap:12px;align-items:center;padding:14px;border-bottom:1px solid #e5ecee}.staffHistory article>div{display:grid}.staffHistory span,.staffHistory small{color:#667085}.staffModal{position:fixed;inset:0;background:rgba(7,20,30,.68);z-index:1000;display:grid;place-items:center;padding:18px;overflow:auto}.staffModal>div{position:relative;background:#fff;width:min(760px,100%);max-height:92vh;overflow:auto;border-radius:28px;padding:28px;box-shadow:0 30px 90px rgba(0,0,0,.3)}.staffForm{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;margin:18px 0}.staffForm label{font-weight:800;color:#536071}.staffForm input,.staffForm select{margin-top:7px;width:100%}.staffForm .checkLine{display:flex;align-items:center;gap:10px;background:#f5f8fa;border-radius:15px;padding:14px}.staffForm .checkLine input{width:auto;margin:0}.employeeScheduleDetail{margin-top:22px;padding-top:18px;border-top:1px solid #e0e8ea}.employeeScheduleDetail span{display:inline-block;margin:5px 7px 0 0;padding:8px 11px;border-radius:12px;background:#edf7f5;color:#176757;font-weight:700}
+@media(max-width:900px){.staffKpis{grid-template-columns:repeat(2,1fr)}.staffHero{align-items:flex-start;flex-direction:column}.staffPresenceList article{grid-template-columns:auto 1fr auto}.staffPresenceList article>span,.staffPresenceList article>button{grid-column:2/-1}.staffHistory article{grid-template-columns:1fr 1fr}.staffHistory article small{grid-column:1/-1}}
+@media(max-width:600px){.staffCenter{gap:16px}.staffHero,.staffCard,.staffModal>div{padding:18px}.staffHeroActions{width:100%}.staffHeroActions button{flex:1}.staffKpis{grid-template-columns:1fr 1fr;gap:10px}.staffKpis article{padding:15px}.staffKpis b{font-size:1.12rem}.staffGrid{grid-template-columns:1fr}.staffCard header{grid-template-columns:auto 1fr}.staffCard em{grid-column:1/-1;text-align:center}.staffForm{grid-template-columns:1fr}.staffFilters select{width:100%}.staffHistory article{grid-template-columns:1fr}.staffTabs{margin-inline:-8px}.staffPresenceList article{grid-template-columns:auto 1fr}.staffPresenceList article strong{grid-column:2}.staffCardStats,.employeeDetailKpis{grid-template-columns:1fr 1fr}}
+
+
+/* HOTFIX PERSONAL 4.3.1 · CONTRASTE Y LEGIBILIDAD MÓVIL */
+.staffCenter,
+.staffCenter .card,
+.staffCenter article,
+.staffCenter section,
+.staffCenter div { box-sizing:border-box; }
+
+/* Pestañas: texto siempre visible tanto activas como inactivas */
+.staffCenter .staffTabs button,
+.staffCenter .staffTabs button * {
+  color:#28246f !important;
+  opacity:1 !important;
+  -webkit-text-fill-color:#28246f !important;
+}
+.staffCenter .staffTabs button {
+  background:#ffffff !important;
+  border:1px solid #cfe2df !important;
+  box-shadow:0 5px 14px rgba(34,72,82,.08) !important;
+  font-weight:800 !important;
+}
+.staffCenter .staffTabs button.active,
+.staffCenter .staffTabs button.active * {
+  color:#ffffff !important;
+  -webkit-text-fill-color:#ffffff !important;
+}
+.staffCenter .staffTabs button.active {
+  background:linear-gradient(135deg,#3faed4,#48b486) !important;
+  border-color:transparent !important;
+}
+
+/* Cabecera de cada empleado: fondo claro y texto oscuro */
+.staffCenter .staffCard > header {
+  background:linear-gradient(135deg,#edf9f6,#f6fbff) !important;
+  color:#172033 !important;
+  border:1px solid #cfe5e1 !important;
+  border-radius:20px !important;
+  padding:15px !important;
+  margin:-2px -2px 16px !important;
+}
+.staffCenter .staffCard > header h3,
+.staffCenter .staffCard > header h3 *,
+.staffCenter .staffCard > header strong {
+  color:#28246f !important;
+  -webkit-text-fill-color:#28246f !important;
+  opacity:1 !important;
+}
+.staffCenter .staffCard > header p,
+.staffCenter .staffCard > header p * {
+  color:#526173 !important;
+  -webkit-text-fill-color:#526173 !important;
+  opacity:1 !important;
+}
+.staffCenter .staffCard > header em.off,
+.staffCenter .staffCard > header em.off * {
+  color:#4d5968 !important;
+  -webkit-text-fill-color:#4d5968 !important;
+  background:#ffffff !important;
+  border:1px solid #d6e0e5 !important;
+}
+.staffCenter .staffCard > header em.working,
+.staffCenter .staffCard > header em.working * {
+  color:#086b49 !important;
+  -webkit-text-fill-color:#086b49 !important;
+  background:#dff7eb !important;
+  border:1px solid #a9dfc7 !important;
+}
+
+/* Datos de tarjeta y estados */
+.staffCenter .staffCardStats span,
+.staffCenter .employeeDetailKpis span { color:#5f6c7f !important; }
+.staffCenter .staffCardStats b,
+.staffCenter .employeeDetailKpis b { color:#141c2e !important; }
+.staffCenter .staffOpen,
+.staffCenter .staffOpen * { color:#086b50 !important; }
+
+/* Botones: impedir blanco sobre blanco o oscuro sobre oscuro */
+.staffCenter button:not(.red):not(.active),
+.staffCenter button:not(.red):not(.active) * {
+  color:#ffffff !important;
+  -webkit-text-fill-color:#ffffff !important;
+}
+.staffCenter .staffTabs button:not(.active),
+.staffCenter .staffTabs button:not(.active) * {
+  color:#28246f !important;
+  -webkit-text-fill-color:#28246f !important;
+}
+.staffCenter button.ghost,
+.staffCenter button.ghost * {
+  color:#ffffff !important;
+  -webkit-text-fill-color:#ffffff !important;
+  background:linear-gradient(135deg,#3faed4,#48b486) !important;
+}
+.staffCenter button.red,
+.staffCenter button.red * {
+  color:#ffffff !important;
+  -webkit-text-fill-color:#ffffff !important;
+}
+
+/* Formularios y modal */
+.staffCenter .staffModal,
+.staffCenter .staffModal * { text-shadow:none !important; }
+.staffCenter .staffModal > div { color:#172033 !important; }
+.staffCenter .staffForm label,
+.staffCenter .staffForm h2,
+.staffCenter .staffForm h3 { color:#26324a !important; }
+.staffCenter .staffForm input,
+.staffCenter .staffForm select,
+.staffCenter .staffFilters select {
+  background:#ffffff !important;
+  color:#172033 !important;
+  -webkit-text-fill-color:#172033 !important;
+}
+.staffCenter .staffForm input::placeholder { color:#8a95a5 !important; opacity:1 !important; }
+
+/* KPI y listados */
+.staffCenter .staffKpis article { background:#ffffff !important; }
+.staffCenter .staffKpis span { color:#59677a !important; }
+.staffCenter .staffKpis b { color:#087f68 !important; }
+.staffCenter .staffPresenceList article,
+.staffCenter .staffHistory article,
+.staffCenter .punctualityBars span { color:#172033 !important; }
+.staffCenter .staffPresenceList strong,
+.staffCenter .staffHistory b,
+.staffCenter .punctualityBars b { color:#172033 !important; }
+
+@media(max-width:600px){
+  .staffCenter .staffTabs{gap:8px;padding:8px;}
+  .staffCenter .staffTabs button{min-width:132px !important;padding:12px 14px !important;}
+  .staffCenter .staffCard > header{grid-template-columns:auto 1fr !important;}
+  .staffCenter .staffCard > header em{grid-column:1/-1 !important;width:100% !important;}
+  .staffCenter .staffCard footer button{min-height:48px !important;}
+}
