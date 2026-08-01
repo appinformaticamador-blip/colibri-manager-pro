@@ -923,3 +923,97 @@ body{padding:0!important;margin:0!important}
 
 /* COLIBRÍ ERP 4.4 CORE · detalle interactivo y rendimiento de gestoría */
 .unifiedProfitKpiButton{width:100%;text-align:left;border:0;cursor:pointer}.unifiedProfitKpiButton:hover{transform:translateY(-2px);box-shadow:0 14px 28px rgba(20,62,78,.12)}.unifiedProfitDetail{max-width:760px;max-height:82vh;overflow:auto}.profitDetailList{display:grid;gap:8px}.gestoriaRealResult{margin-top:20px}.gestoriaRealResult .unifiedProfitKpis{margin-top:16px}.gestoriaRealResult .kpi{background:#fff;border:1px solid #dbe8ec;border-radius:18px;padding:18px}.gestoriaRealResult .kpi span{display:block;color:#64748b;font-weight:700}.gestoriaRealResult .kpi b{display:block;color:#078b75;font-size:1.7rem;margin-top:6px}
+
+
+/* Resultado real · detalle de tarjetas: fondo opaco y alto contraste */
+.unifiedProfitModalOverlay{
+  position:fixed;
+  inset:0;
+  z-index:1000;
+  display:grid;
+  place-items:center;
+  padding:18px;
+  background:rgba(7,20,30,.62);
+  backdrop-filter:blur(6px);
+}
+.unifiedProfitModalOverlay .unifiedProfitDetail,
+.unifiedProfit .modalbox.unifiedProfitDetail{
+  width:min(760px,100%);
+  max-width:760px;
+  max-height:min(84vh,920px);
+  overflow:auto;
+  box-sizing:border-box;
+  padding:24px;
+  border-radius:28px;
+  background:#ffffff !important;
+  color:#172033 !important;
+  border:1px solid #d7e6ea;
+  box-shadow:0 28px 80px rgba(3,20,36,.28);
+}
+.unifiedProfitDetail *{
+  color:inherit;
+  opacity:1;
+}
+.unifiedProfitDetailHeader{
+  align-items:flex-start;
+  gap:12px;
+  margin-bottom:14px;
+}
+.unifiedProfitDetailHeader h2{
+  margin:6px 0 0;
+  color:#28246f;
+  font-size:clamp(1.45rem,3.2vw,2rem);
+}
+.unifiedProfitDetailHeader .sectionEyebrow{
+  display:block;
+}
+.unifiedProfitDetailHeader button{
+  width:auto;
+  min-width:110px;
+  background:#eef6f8;
+  color:#23455c;
+  border:1px solid #d4e4e9;
+}
+.unifiedProfitDetail .profitDetailList{
+  display:grid;
+  gap:10px;
+}
+.unifiedProfitDetail .profitDetailRow{
+  margin:0;
+  align-items:flex-start;
+  padding:14px 0;
+  border-bottom:1px solid #e4ecef;
+}
+.unifiedProfitDetail .profitDetailRow:last-child{
+  border-bottom:0;
+}
+.unifiedProfitDetail .profitDetailRow span{
+  color:#536273;
+  font-weight:700;
+  line-height:1.4;
+}
+.unifiedProfitDetail .profitDetailRow b{
+  color:#102123;
+  text-align:right;
+  line-height:1.4;
+}
+@media(max-width:700px){
+  .unifiedProfitModalOverlay{
+    padding:10px;
+    align-items:center;
+  }
+  .unifiedProfitModalOverlay .unifiedProfitDetail,
+  .unifiedProfit .modalbox.unifiedProfitDetail{
+    width:calc(100vw - 20px);
+    padding:18px;
+    border-radius:24px;
+  }
+  .unifiedProfitDetail .profitDetailRow{
+    display:grid;
+    grid-template-columns:1fr;
+    gap:6px;
+  }
+  .unifiedProfitDetail .profitDetailRow b{
+    text-align:left;
+  }
+}
