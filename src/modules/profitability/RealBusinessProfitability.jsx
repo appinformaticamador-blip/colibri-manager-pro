@@ -12,7 +12,26 @@ function isoWeekId(value){const d=dateUTC(value);const day=d.getUTCDay()||7;d.se
 function mondayIndex(value){return (dateUTC(value).getUTCDay()+6)%7}
 function entryIdentity(entry){if(entry&&typeof entry==='object')return String(entry.id||entry.employee_id||entry.name||entry.employee_name||entry.nombre||'').trim();return String(entry||'').trim()}
 function entryName(entry){if(entry&&typeof entry==='object')return String(entry.name||entry.employee_name||entry.nombre||entry.id||'Empleado');return String(entry||'Empleado')}
-function activeEntries(entries){return (Array.isArray(entries)?entries:[]).filter(x=>{const id=entryIdentity(x).toLowerCase();return id&&id!=='__closed__'&&id!=='closed'&&id!=='cerrado'})}
+function normalized(value){return String(value||'').trim().toLocaleLowerCase('es-ES').normalize('NFD').replace(/[\u0300-\u036f]/g,'')}
+function isClosedEntry(entry){
+ const value=normalized(entryIdentity(entry)).replace(/\s+/g,'_');
+ return !value||['__cerrado__','_cerrado_','cerrado','__closed__','_closed_','closed'].includes(value);
+}
+function activeEntries(entries){return (Array.isArray(entries)?entries:[]).filter(entry=>!isClosedEntry(entry))}
+function buildEmployeeResolver(employees){
+ const byId=new Map(),byName=new Map();
+ for(const employee of employees||[]){
+  const id=String(employee?.id||'').trim();
+  const name=normalized(employee?.name||employee?.employee_name);
+  if(id)byId.set(id,employee);
+  if(name)byName.set(name,employee);
+ }
+ return entry=>{
+  const id=entryIdentity(entry);
+  const name=entryName(entry);
+  return byId.get(id)||byName.get(normalized(name))||byName.get(normalized(id))||null;
+ };
+}
 function entriesFor(data,weekId,day,slot){
  const source=data&&typeof data==='object'?data:{};
  const flat=source[`${weekId}|${day}|${slot}`];
@@ -26,7 +45,7 @@ async function safeQuery(query){try{const {data,error}=await query;if(error)retu
 
 export async function loadRealProfitability(supabase,from,to,clocks=[]){
  const start=isoDate(from),end=isoDate(to);
- const result={purchases:0,payroll:0,fixed:0,variable:0,total:0,clockHours:0,hours:0,laborAccrued:0,scheduleRows:[],details:{fixed:[],variable:[],labor:[]}};
+ const result={purchases:0,payroll:0,fixed:0,variable:0,total:0,clockHours:0,hours:0,laborAccrued:0,scheduleRows:[],details:{fixed:[],variable:[],labor:[],invalidScheduleEntries:[]}};
  result.clockHours=(clocks||[]).reduce((s,r)=>s+num(r.hours||r.total_hours),0);
  if(!supabase||!start||!end||start>=end)return result;
 
@@ -58,9 +77,10 @@ export async function loadRealProfitability(supabase,from,to,clocks=[]){
 
  // Perfil horario único: employees es la fuente principal; se mantiene compatibilidad con perfiles antiguos.
  const profileById=new Map(),profileByName=new Map();
- for(const e of employees){const cost=hourlyCost(e);const id=String(e.id||'').trim();const name=String(e.name||'').trim().toLowerCase();if(id)profileById.set(id,cost);if(name)profileByName.set(name,cost)}
- for(const p of costProfiles){const cost=num(p.hourly_cost)||DEFAULT_HOURLY_COST;const id=String(p.employee_id||'').trim();const name=String(p.employee_name||'').trim().toLowerCase();if(id&&!profileById.has(id))profileById.set(id,cost);if(name&&!profileByName.has(name))profileByName.set(name,cost)}
+ for(const e of employees){const cost=hourlyCost(e);const id=String(e.id||'').trim();const name=normalized(e.name);if(id)profileById.set(id,cost);if(name)profileByName.set(name,cost)}
+ for(const p of costProfiles){const cost=num(p.hourly_cost)||DEFAULT_HOURLY_COST;const id=String(p.employee_id||'').trim();const name=normalized(p.employee_name);if(id&&!profileById.has(id))profileById.set(id,cost);if(name&&!profileByName.has(name))profileByName.set(name,cost)}
  const weekById=new Map(scheduleWeeks.map(w=>[String(w.week_id),w]));
+ const resolveEmployee=buildEmployeeResolver(employees);
  const laborMap=new Map();
  for(let day=start;day<end;day=addDays(day,1)){
   const weekId=isoWeekId(day),weekRow=weekById.get(weekId);if(!weekRow)continue;
@@ -74,8 +94,16 @@ export async function loadRealProfitability(supabase,from,to,clocks=[]){
   for(const slot of slots){
    const hours=slotHours(slot);if(!hours)continue;
    for(const entry of activeEntries(entriesFor(data,weekId,dayName,slot))){
-    const id=entryIdentity(entry),name=entryName(entry),costHour=profileById.get(id)||profileByName.get(name.toLowerCase())||DEFAULT_HOURLY_COST;
-    const key=id||name;const current=laborMap.get(key)||{employee_id:id,employee_name:name,hours:0,cost:0,hourly_cost:costHour};
+    const employee=resolveEmployee(entry);
+    // Un cuadrante solo puede generar horas y coste para un empleado real de la tabla employees.
+    // UUID huérfanos, nombres antiguos sin correspondencia y marcadores CERRADO se excluyen a coste 0.
+    if(!employee){
+     result.details.invalidScheduleEntries.push({date:day,week_id:weekId,day:dayName,slot,value:entryIdentity(entry)});
+     continue;
+    }
+    const id=String(employee.id||'').trim(),name=String(employee.name||employee.employee_name||'Empleado').trim();
+    const costHour=profileById.get(id)||profileByName.get(normalized(name))||hourlyCost(employee)||DEFAULT_HOURLY_COST;
+    const key=id||normalized(name);const current=laborMap.get(key)||{employee_id:id,employee_name:name,hours:0,cost:0,hourly_cost:costHour};
     current.hours+=hours;current.cost+=hours*costHour;laborMap.set(key,current);
     result.scheduleRows.push({date:day,week_id:weekId,day:dayName,slot,employees:1,employee_id:id,employee_name:name,hourly_cost:costHour});
    }
