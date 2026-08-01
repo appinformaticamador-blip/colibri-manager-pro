@@ -1,6 +1,5 @@
 import React,{useEffect,useState} from 'react';
-
-const DEFAULT_HOURLY_COST=7;
+import {DEFAULT_HOURLY_COST,hourlyCost,laborFromClockRecords} from '../coreBusiness';
 const DAYS=['Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','Domingo'];
 
 function num(value){const n=Number(value);return Number.isFinite(n)?n:0}
@@ -37,7 +36,7 @@ export async function loadRealProfitability(supabase,from,to,clocks=[]){
   safeQuery(supabase.from('business_variable_expenses').select('*').gte('expense_date',start).lt('expense_date',end).order('expense_date',{ascending:true}).limit(5000)),
   safeQuery(supabase.from('work_schedule_weeks').select('*').in('week_id',weekIds).limit(200)),
   safeQuery(supabase.from('employee_cost_profiles').select('*').eq('active',true).limit(1000)),
-  safeQuery(supabase.from('employees').select('id,name,hourly_rate,active').limit(1000)),
+  safeQuery(supabase.from('employees').select('*').limit(1000)),
   safeQuery(supabase.from('profitability_costs').select('*').gte('date',start).lt('date',end).limit(5000))
  ]);
 
@@ -57,10 +56,10 @@ export async function loadRealProfitability(supabase,from,to,clocks=[]){
  result.details.variable=variableRows.map(row=>({...row,amount:num(row.amount||row.total)}));
  result.variable=result.details.variable.reduce((s,row)=>s+row.amount,0);
 
- // Coste de personal según el cuadrante. Usa coste individual si existe; 7 €/h como respaldo.
+ // Perfil horario único: employees es la fuente principal; se mantiene compatibilidad con perfiles antiguos.
  const profileById=new Map(),profileByName=new Map();
- for(const e of employees){if(e.active===false)continue;const cost=num(e.hourly_rate)||DEFAULT_HOURLY_COST;const id=String(e.id||'').trim();const name=String(e.name||'').trim().toLowerCase();if(id)profileById.set(id,cost);if(name)profileByName.set(name,cost)}
- for(const p of costProfiles){const cost=num(p.hourly_cost)||DEFAULT_HOURLY_COST;const id=String(p.employee_id||'').trim();const name=String(p.employee_name||'').trim().toLowerCase();if(id)profileById.set(id,cost);if(name)profileByName.set(name,cost)}
+ for(const e of employees){const cost=hourlyCost(e);const id=String(e.id||'').trim();const name=String(e.name||'').trim().toLowerCase();if(id)profileById.set(id,cost);if(name)profileByName.set(name,cost)}
+ for(const p of costProfiles){const cost=num(p.hourly_cost)||DEFAULT_HOURLY_COST;const id=String(p.employee_id||'').trim();const name=String(p.employee_name||'').trim().toLowerCase();if(id&&!profileById.has(id))profileById.set(id,cost);if(name&&!profileByName.has(name))profileByName.set(name,cost)}
  const weekById=new Map(scheduleWeeks.map(w=>[String(w.week_id),w]));
  const laborMap=new Map();
  for(let day=start;day<end;day=addDays(day,1)){
@@ -82,10 +81,19 @@ export async function loadRealProfitability(supabase,from,to,clocks=[]){
    }
   }
  }
- result.details.labor=[...laborMap.values()];
- result.hours=result.details.labor.reduce((s,r)=>s+r.hours,0);
- result.laborAccrued=result.details.labor.reduce((s,r)=>s+r.cost,0);
+ result.details.plannedLabor=[...laborMap.values()];
+ result.plannedHours=result.details.plannedLabor.reduce((s,r)=>s+r.hours,0);
+ result.plannedLaborCost=result.details.plannedLabor.reduce((s,r)=>s+r.cost,0);
+ const activeEmployees=employees.filter(e=>e.active!==false);
+ const actualLabor=laborFromClockRecords(clocks,activeEmployees,start,end,new Date());
+ result.details.labor=actualLabor.details;
+ result.hours=actualLabor.hours;
+ result.clockHours=actualLabor.hours;
+ result.laborAccrued=actualLabor.cost;
  result.payroll=result.laborAccrued;
+ // Si todavía no existen fichajes en el periodo, se conserva el coste previsto como respaldo explícito.
+ result.laborSource=result.hours>0?'clock_records':'work_schedule_weeks';
+ if(result.hours===0&&result.plannedHours>0){result.hours=result.plannedHours;result.laborAccrued=result.plannedLaborCost;result.payroll=result.laborAccrued;result.details.labor=result.details.plannedLabor}
 
  // Compatibilidad: solo usa registros antiguos en categorías que aún no tienen datos nuevos.
  for(const row of legacyRows){

@@ -1,3 +1,4 @@
+import {buildClockSessions} from '../coreBusiness';
 export const HOURLY_RATE=7;
 export const DAYS_ES=['Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','Domingo'];
 export const RESTAURANT_ID='braseria-el-colibri';
@@ -16,11 +17,12 @@ export function durationText(min=0){const h=Math.floor(min/60),m=Math.round(min%
 export function money(v){return new Intl.NumberFormat('es-ES',{style:'currency',currency:'EUR'}).format(Number(v||0))}
 export function asArray(v){return Array.isArray(v)?v:[]}
 export function pairClockRecords(rows=[]){
- const sorted=[...rows].sort((a,b)=>new Date(a.created_at)-new Date(b.created_at)); const byDay={}; let open=null;
- for(const r of sorted){const type=String(r.type||'').toLowerCase(); if(type==='entrada'){if(open){const key=isoDate(open.created_at);(byDay[key]??=[]).push({entry:open,exit:null,minutes:durationMinutes(open.created_at,new Date())});}open=r;}else if(type==='salida'&&open){const key=isoDate(open.created_at);(byDay[key]??=[]).push({entry:open,exit:r,minutes:durationMinutes(open.created_at,r.created_at)});open=null;}}
- if(open){const key=isoDate(open.created_at);(byDay[key]??=[]).push({entry:open,exit:null,minutes:durationMinutes(open.created_at,new Date())});}
+ const byDay={};const {sessions}=buildClockSessions(rows,null,new Date());
+ for(const session of sessions){if(!session.start)continue;const key=isoDate(session.start.created_at);(byDay[key]??=[]).push({entry:session.start,exit:session.end,minutes:session.minutes});}
  return byDay;
 }
+export function currentClockState(rows=[]){return buildClockSessions(rows,null,new Date());}
+
 export function employeeNames(e){return [e?.name,e?.employee_name,e?.nombre].filter(Boolean).map(String)}
 export function scheduleForEmployee(scheduleRow,employee){
  const data=scheduleRow?.data||{}; const result={}; const ids=new Set([String(employee?.id||''),...employeeNames(employee)].filter(Boolean));

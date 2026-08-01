@@ -1,5 +1,5 @@
 import React,{useEffect,useMemo,useState} from 'react';
-import {HOURLY_RATE,DAYS_ES,RESTAURANT_ID,copyText,dayName,durationText,isoDate,mondayOf,money,pairClockRecords,scheduleForEmployee,scheduledMinutes,slotBounds,weekIdFor} from './peopleUtils';
+import {HOURLY_RATE,DAYS_ES,RESTAURANT_ID,copyText,dayName,durationText,isoDate,mondayOf,money,pairClockRecords,currentClockState,scheduleForEmployee,scheduledMinutes,slotBounds,weekIdFor} from './peopleUtils';
 
 export default function PeoplePortal({supabase,Brand}){
  const[employee,setEmployee]=useState(null),[employees,setEmployees]=useState([]),[employeeId,setEmployeeId]=useState(''),[pin,setPin]=useState(''),[showPin,setShowPin]=useState(false),[msg,setMsg]=useState(''),[busy,setBusy]=useState(false);
@@ -20,11 +20,13 @@ function EmployeeHome({supabase,employee,onLogout}){
   supabase.from('employee_time_requests').select('*').eq('employee_id',employee.id).order('created_at',{ascending:false}).limit(20)
  ]);setRows(r||[]);setScheduleRow(s||null);setRequests(q||[]);setLoading(false)}
  const pairs=useMemo(()=>pairClockRecords(rows),[rows,now]);const schedule=useMemo(()=>scheduleForEmployee(scheduleRow,employee),[scheduleRow,employee]);
- const latest=rows[rows.length-1],working=String(latest?.type||'').toLowerCase()==='entrada';
+ const clockState=currentClockState(rows),openSession=clockState.openSession,latest=openSession?.start||rows[rows.length-1],working=Boolean(openSession);
  const totalMinutes=Object.values(pairs).flat().reduce((a,x)=>a+x.minutes,0);const planned=scheduledMinutes(schedule);const pending=requests.filter(x=>x.status==='pending');
  const validatedMinutes=Object.entries(pairs).reduce((sum,[date,ps])=>{const actual=ps.reduce((a,x)=>a+x.minutes,0);const day=dayName(date+'T12:00:00');const dailyPlanned=scheduledMinutes({[day]:schedule[day]||[]});const approved=requests.some(r=>r.status==='approved'&&isoDate(r.proposed_at)===date);return sum+(approved?actual:dailyPlanned?Math.min(actual,dailyPlanned):0)},0);
  const todayName=dayName(new Date()),todayBounds=slotBounds(schedule[todayName]||[]);const todayPairs=pairs[isoDate(new Date())]||[];
  async function clock(type,method='gps'){
+  if(type==='entrada'&&working)return setMsg('Ya tienes una jornada abierta. Registra la salida antes de volver a entrar.');
+  if(type==='salida'&&!working)return setMsg('No tienes ninguna jornada abierta para cerrar.');
   setMsg('Comprobando ubicación...');let coords=null;if(method==='gps'){try{coords=await new Promise((res,rej)=>navigator.geolocation.getCurrentPosition(res,rej,{enableHighAccuracy:true,timeout:15000}));}catch{return setMsg('No se pudo obtener el GPS. Usa el QR del local.')}}
   const note=type==='salida'&&todayBounds&&new Date().toTimeString().slice(0,5)>todayBounds.end?prompt('Has superado el horario previsto. Escribe el motivo para que el gerente pueda revisarlo:','')||'': '';
   const{data,error}=await supabase.rpc('registrar_fichaje_v2',{p_employee_name:employee.name,p_pin:employee.pin,p_type:type,p_note:note,p_gps_lat:coords?.coords?.latitude||null,p_gps_lng:coords?.coords?.longitude||null,p_accuracy:coords?.coords?.accuracy||null,p_method:method});

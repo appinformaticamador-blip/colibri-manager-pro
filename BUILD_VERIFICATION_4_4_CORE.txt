@@ -1,0 +1,30 @@
+COLIBRÍ ERP 4.4 CORE · INFORME DE VERIFICACIÓN
+Fecha: 2026-08-01
+
+COMPROBACIONES SUPERADAS
+- Estructura completa del proyecto inspeccionada.
+- Entradas separadas App.jsx / people-entry.jsx conservadas.
+- Todos los imports locales de src/ apuntan a archivos existentes.
+- Prueba directa del motor de fichajes superada:
+  * entrada duplicada detectada como anomalía;
+  * una sola sesión válida;
+  * salida cierra la entrada real;
+  * cálculo de 4 horas correcto.
+- Prueba directa de coste laboral superada: 4 h × 10 €/h = 40 €.
+- Prueba directa de rentabilidad superada: 1.000 - 300 - 200 - 100 - 50 = 350 €.
+
+COMANDOS EJECUTADOS
+npm ci --no-audit --no-fund
+npm run build (no pudo iniciarse porque npm ci no completó)
+
+BLOQUEO DEL ENTORNO
+El proxy npm interno devolvió HTTP 404 para paquetes públicos existentes:
+- yallist-3.1.1.tgz
+- xlsx-0.18.5.tgz
+- ws-8.21.0.tgz
+
+Por esa causa no se instaló Vite y no es posible afirmar que el build Vite haya terminado en este entorno.
+Debe ejecutarse de nuevo en GitHub Actions, Vercel o un equipo con acceso normal a registry.npmjs.org:
+
+npm ci --no-audit --no-fund
+npm run build
