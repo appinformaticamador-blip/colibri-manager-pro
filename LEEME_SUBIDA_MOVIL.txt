@@ -1,0 +1,16 @@
+COLIBRÍ ERP 4.3 — REEMPLAZO SEGURO
+
+Este ZIP incluye la carpeta src COMPLETA de la versión 4.3.
+Corrige el error:
+Could not resolve "./people-entry.jsx" from "src/main.jsx"
+
+SUBIDA DESDE GITHUB MÓVIL
+1. Entra en la rama develop.
+2. Sustituye la carpeta src completa por la carpeta src de este ZIP.
+3. Sube también:
+   sql/COLIBRI_ERP_4_3_PERSONAL_UNIFICADO.sql
+4. No borres index.html, public, vercel.json ni la carpeta .github.
+5. Commit recomendado:
+   Personal 4.3 - restaurar src completo y portal People
+
+Después ejecuta una vez el SQL en Supabase.
