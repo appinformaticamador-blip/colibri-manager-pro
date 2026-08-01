@@ -32,11 +32,12 @@ export async function loadRealProfitability(supabase,from,to,clocks=[]){
  if(!supabase||!start||!end||start>=end)return result;
 
  const weekIds=[...new Set(Array.from({length:Math.max(1,Math.ceil((dateUTC(end)-dateUTC(start))/86400000))},(_,i)=>isoWeekId(addDays(start,i))))];
- const [fixedRows,variableRows,scheduleWeeks,costProfiles,legacyRows]=await Promise.all([
+ const [fixedRows,variableRows,scheduleWeeks,costProfiles,employees,legacyRows]=await Promise.all([
   safeQuery(supabase.from('business_fixed_expenses').select('*').lte('start_date',addDays(end,-1)).or(`end_date.is.null,end_date.gte.${start}`).limit(5000)),
   safeQuery(supabase.from('business_variable_expenses').select('*').gte('expense_date',start).lt('expense_date',end).order('expense_date',{ascending:true}).limit(5000)),
   safeQuery(supabase.from('work_schedule_weeks').select('*').in('week_id',weekIds).limit(200)),
   safeQuery(supabase.from('employee_cost_profiles').select('*').eq('active',true).limit(1000)),
+  safeQuery(supabase.from('employees').select('id,name,hourly_rate,active').limit(1000)),
   safeQuery(supabase.from('profitability_costs').select('*').gte('date',start).lt('date',end).limit(5000))
  ]);
 
@@ -58,6 +59,7 @@ export async function loadRealProfitability(supabase,from,to,clocks=[]){
 
  // Coste de personal según el cuadrante. Usa coste individual si existe; 7 €/h como respaldo.
  const profileById=new Map(),profileByName=new Map();
+ for(const e of employees){if(e.active===false)continue;const cost=num(e.hourly_rate)||DEFAULT_HOURLY_COST;const id=String(e.id||'').trim();const name=String(e.name||'').trim().toLowerCase();if(id)profileById.set(id,cost);if(name)profileByName.set(name,cost)}
  for(const p of costProfiles){const cost=num(p.hourly_cost)||DEFAULT_HOURLY_COST;const id=String(p.employee_id||'').trim();const name=String(p.employee_name||'').trim().toLowerCase();if(id)profileById.set(id,cost);if(name)profileByName.set(name,cost)}
  const weekById=new Map(scheduleWeeks.map(w=>[String(w.week_id),w]));
  const laborMap=new Map();
