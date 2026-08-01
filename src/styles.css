@@ -1020,3 +1020,185 @@ body{padding:0!important;margin:0!important}
 
 /* 4.4.2 · trazabilidad de Resultado real y rendimiento de Gestoría */
 .unifiedTraceTable{margin-top:18px;max-height:52vh;overflow:auto;border:1px solid #dce8ec;border-radius:16px}.unifiedTraceTable table{min-width:650px}.unifiedTraceTable button{width:auto;padding:8px 12px}.unifiedTraceList{display:grid;gap:10px;margin-top:18px}.unifiedTraceList article{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:14px;border:1px solid #dce8ec;border-radius:16px;background:#f8fbfc}.unifiedTraceList article>div{display:grid;gap:4px;min-width:0}.unifiedTraceList b{color:#20285a}.unifiedTraceList small{color:#5f6d7d;line-height:1.4}.unifiedTraceList em{font-style:normal;font-size:.78rem;font-weight:850}.unifiedTraceList em.warn{color:#9a6100}.unifiedTraceList em.ok{color:#08764e}.unifiedTraceList button{width:auto;flex:0 0 auto}.gestoriaRealBreakdown{grid-template-columns:1fr 1fr;margin-top:18px}.gestoriaRealBreakdown>div{background:#f7fafb;border:1px solid #dce8ec;border-radius:18px;padding:16px}.gestoriaRealBreakdown h3{margin-top:0;color:#28246f}.gestoriaRealBreakdown p{display:flex;justify-content:space-between;gap:12px;padding:9px 0;margin:0;border-bottom:1px solid #e3eaed}.gestoriaRealBreakdown p:last-child{border-bottom:0}.gestoriaRealBreakdown span{color:#536273}.gestoriaRealBreakdown b{color:#0b7f6d;text-align:right}@media(max-width:700px){.unifiedTraceList article{align-items:flex-start;flex-wrap:wrap}.unifiedTraceList article button{width:100%}.gestoriaRealBreakdown{grid-template-columns:1fr}}
+
+/* =========================================================
+   COLIBRÍ ERP 4.5 · NAVEGACIÓN Y DISEÑO UNIFICADO
+   ========================================================= */
+:root{
+  --ui-bg:#eef5f7;
+  --ui-surface:#ffffff;
+  --ui-surface-soft:#f5f9fa;
+  --ui-text:#14212f;
+  --ui-text-soft:#586779;
+  --ui-title:#29256f;
+  --ui-line:#d6e3e7;
+  --ui-primary:#087f70;
+  --ui-primary-dark:#056357;
+  --ui-primary-soft:#dff4ef;
+  --ui-blue:#319fc7;
+  --ui-danger:#c9362b;
+  --ui-warning:#a86400;
+  --ui-shadow:0 12px 34px rgba(25,58,76,.09);
+}
+
+.erpShell{background:var(--ui-bg);color:var(--ui-text)}
+.erpShell .page{color:var(--ui-text)}
+.erpShell .card,
+.erpShell .panel,
+.erpShell .modalbox{
+  background:var(--ui-surface);
+  color:var(--ui-text);
+  border:1px solid var(--ui-line);
+  box-shadow:var(--ui-shadow);
+}
+.erpShell h1,.erpShell h2,.erpShell h3,.erpShell h4{color:var(--ui-title)}
+.erpShell p,.erpShell label,.erpShell td,.erpShell th{color:var(--ui-text)}
+.erpShell small,.erpShell .mutedText{color:var(--ui-text-soft)}
+.erpShell input,.erpShell select,.erpShell textarea{
+  background:#fff;
+  color:var(--ui-text);
+  border:1px solid #bfd1d7;
+}
+.erpShell input::placeholder,.erpShell textarea::placeholder{color:#738293}
+.erpShell button{min-height:42px}
+.erpShell button:not(.red):not(.danger):not(.ghost):not(.secondary):not(.active){
+  background:linear-gradient(135deg,var(--ui-blue),#43b286);
+  color:#fff;
+}
+.erpShell button.ghost,.erpShell button.secondary{
+  background:#f1f6f8;
+  color:#27465b;
+  border:1px solid #cddde3;
+  box-shadow:none;
+}
+.erpShell button.red,.erpShell button.danger{background:var(--ui-danger);color:#fff}
+.erpShell table thead th{background:#eaf3f5;color:#26394a}
+.erpShell table tbody tr{background:#fff}
+.erpShell table tbody tr:hover{background:#f3f8f9}
+
+.erpSidebar{width:auto;padding:20px 14px;background:#f7fafb;color:var(--ui-text)}
+.sideNav{gap:14px;margin-top:22px}
+.sideNav .navGroup{display:grid;gap:5px}
+.sideNav .navGroup h3{
+  margin:4px 10px 3px;
+  color:#718092;
+  font-size:.69rem;
+  letter-spacing:.12em;
+  text-transform:uppercase;
+  font-weight:900;
+}
+.sideNav .navGroup button{
+  min-height:44px;
+  background:transparent!important;
+  color:#35485a!important;
+  border:1px solid transparent;
+  box-shadow:none!important;
+}
+.sideNav .navGroup button:hover{background:#edf5f6!important;color:#17384c!important}
+.sideNav .navGroup button.active{
+  background:var(--ui-primary-soft)!important;
+  color:var(--ui-primary-dark)!important;
+  border-color:#b9ddd5;
+  border-left:4px solid var(--ui-primary);
+}
+.sideNav .navGroup button.active span,.sideNav .navGroup button.active b{color:var(--ui-primary-dark)!important}
+
+.mobileAppBar{display:none}
+.appDrawerLayer{display:none}
+
+@media(max-width:900px){
+  body.erpMenuOpen{overflow:hidden}
+  .erpShell{display:block;padding-top:72px}
+  .erpSidebar{display:none!important}
+  .mobileTop{display:none!important}
+  .mobileAppBar{
+    position:fixed;
+    z-index:800;
+    left:0;right:0;top:0;
+    height:72px;
+    display:grid;
+    grid-template-columns:48px minmax(0,1fr) 40px;
+    align-items:center;
+    gap:10px;
+    padding:0 14px max(0px,env(safe-area-inset-right)) 14px;
+    box-sizing:border-box;
+    background:#fff;
+    color:var(--ui-text);
+    border-bottom:1px solid var(--ui-line);
+    box-shadow:0 5px 20px rgba(18,48,65,.12);
+  }
+  .hamburgerButton{
+    width:46px!important;
+    min-width:46px!important;
+    height:46px;
+    min-height:46px!important;
+    display:grid;
+    place-content:center;
+    gap:5px;
+    padding:0!important;
+    border-radius:14px!important;
+    background:#e8f4f2!important;
+    border:1px solid #c9e1dc!important;
+    box-shadow:none!important;
+  }
+  .hamburgerButton span{display:block;width:22px;height:3px;border-radius:4px;background:#075f55}
+  .mobileAppIdentity{display:grid;min-width:0;line-height:1.12}
+  .mobileAppIdentity small{color:#677688;font-size:.68rem;text-transform:uppercase;letter-spacing:.1em;font-weight:900}
+  .mobileAppIdentity b{margin-top:4px;color:var(--ui-title);font-size:1.05rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .mobileAppMark{display:grid;place-items:center;width:38px;height:38px;border-radius:12px;background:#e4f5f0;color:#087b6b;font-weight:900}
+  .appDrawerLayer{
+    position:fixed;
+    inset:0;
+    z-index:1200;
+    display:block;
+    background:rgba(8,20,29,.68);
+    backdrop-filter:blur(4px);
+  }
+  .appDrawer{
+    width:min(88vw,360px);
+    height:100dvh;
+    display:flex;
+    flex-direction:column;
+    box-sizing:border-box;
+    background:#fff;
+    color:var(--ui-text);
+    border-right:1px solid var(--ui-line);
+    box-shadow:18px 0 50px rgba(0,0,0,.25);
+    animation:drawerIn .2s ease-out;
+    overflow:hidden;
+  }
+  @keyframes drawerIn{from{transform:translateX(-100%)}to{transform:translateX(0)}}
+  .appDrawerHeader{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:18px 16px;border-bottom:1px solid var(--ui-line);background:#f8fbfb}
+  .appDrawerHeader .brandMark{width:54px;height:56px}
+  .appDrawerHeader .brand img{width:50px;height:52px}
+  .appDrawerHeader .brand h1{font-size:21px;color:var(--ui-title)!important}
+  .appDrawerHeader .brand p{color:var(--ui-text-soft)!important}
+  .drawerClose{
+    width:42px!important;min-width:42px!important;height:42px;min-height:42px!important;padding:0!important;
+    border-radius:50%!important;background:#edf3f5!important;color:#263b4c!important;border:1px solid #d4e0e4!important;box-shadow:none!important;font-size:1.7rem;
+  }
+  .appDrawerNav{flex:1;overflow:auto;padding:12px 12px 20px;display:grid;align-content:start;gap:16px}
+  .appDrawerNav .navGroup{display:grid;gap:6px}
+  .appDrawerNav .navGroup h3{margin:4px 9px;color:#6e7d8e;font-size:.7rem;letter-spacing:.12em;text-transform:uppercase}
+  .appDrawerNav button{
+    width:100%;min-height:50px;display:grid;grid-template-columns:30px 1fr 16px;align-items:center;gap:8px;text-align:left;
+    padding:11px 13px!important;border-radius:15px!important;background:#fff!important;color:#304456!important;border:1px solid transparent!important;box-shadow:none!important;
+  }
+  .appDrawerNav button span{font-size:1.18rem;color:#336171}
+  .appDrawerNav button b{color:#304456;font-size:.94rem}
+  .appDrawerNav button i{font-style:normal;color:#82909d;font-size:1.25rem}
+  .appDrawerNav button.active{background:var(--ui-primary-soft)!important;border-color:#b9ddd5!important}
+  .appDrawerNav button.active span,.appDrawerNav button.active b,.appDrawerNav button.active i{color:var(--ui-primary-dark)!important}
+  .appDrawerUser{display:flex;align-items:center;gap:11px;padding:15px 16px calc(15px + env(safe-area-inset-bottom));border-top:1px solid var(--ui-line);background:#f6faf9}
+  .appDrawerUser b{color:var(--ui-title)}
+  .appDrawerUser small{display:block;color:var(--ui-text-soft);margin-top:2px}
+  .erpMain{min-width:0}
+  .page{padding:14px 10px 30px!important}
+  .card{border-radius:20px!important}
+}
+
+/* Contraste reforzado en estados y tarjetas coloreadas */
+.erpShell .ok{color:#08734f!important}
+.erpShell .bad,.erpShell .error{color:#a72820!important}
+.erpShell .warningText,.erpShell .warn{color:#8a5600!important}
+.erpShell .sectionEyebrow{color:#08786f!important}

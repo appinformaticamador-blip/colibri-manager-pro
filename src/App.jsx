@@ -1361,11 +1361,31 @@ function Brand(){return <div className="brand"><div className="brandMark"><img s
 function Manager(){
  const initial=history.state?.colibriRoute||{tab:'dashboard',section:null,payload:null};
  const[route,setRoute]=useState(initial);
- const tabs=[['dashboard','⌂','Dashboard'],['servicio','◉','Centro mando'],['inteligencia','✦','Inteligencia'],['tpv','▣','TPV'],['gestoria','▤','Gestoría'],['rentabilidad','€','Costes'],['resultado','◎','Resultado real'],['almacen','▥','Almacén'],['asistente','✧','IA del negocio'],['empleados','♟','Personal'],['cuadrantes','▦','Cuadrantes'],['comparador','⇄','Comparador'],['config','⚙','Configuración']];
- useEffect(()=>{const onPop=e=>setRoute(e.state?.colibriRoute||{tab:'dashboard',section:null,payload:null});addEventListener('popstate',onPop);return()=>removeEventListener('popstate',onPop)},[]);
- function navigate(tab,section=null,payload=null,{replace=false}={}){const next={tab,section,payload};setRoute(next);const fn=replace?'replaceState':'pushState';history[fn]({...(history.state||{}),colibriRoute:next},'',location.href);requestAnimationFrame(()=>scrollTo({top:0,behavior:'smooth'}));}
+ const[menuOpen,setMenuOpen]=useState(false);
+ const navGroups=[
+  {id:'inicio',label:'Inicio',items:[['dashboard','⌂','Dashboard']]},
+  {id:'operacion',label:'Operación',items:[['servicio','◉','Operación en directo'],['tpv','▣','TPV y caja']]},
+  {id:'finanzas',label:'Finanzas',items:[['resultado','◎','Resultado real'],['rentabilidad','€','Productos, costes y gastos']]},
+  {id:'personal',label:'Personal',items:[['empleados','♟','Plantilla'],['fichajes','◷','Fichajes'],['cuadrantes','▦','Cuadrantes'],['comparador','⇄','Comparador']]},
+  {id:'control',label:'Control y análisis',items:[['gestoria','▤','Gestoría'],['inteligencia','✦','Inteligencia'],['asistente','✧','IA del negocio'],['almacen','▥','Almacén']]},
+  {id:'sistema',label:'Sistema',items:[['config','⚙','Configuración']]}
+ ];
+ const flatItems=navGroups.flatMap(g=>g.items.map(([id,icon,label])=>({id,icon,label,group:g.label})));
+ useEffect(()=>{const onPop=e=>{setRoute(e.state?.colibriRoute||{tab:'dashboard',section:null,payload:null});setMenuOpen(false)};addEventListener('popstate',onPop);return()=>removeEventListener('popstate',onPop)},[]);
+ useEffect(()=>{document.body.classList.toggle('erpMenuOpen',menuOpen);return()=>document.body.classList.remove('erpMenuOpen')},[menuOpen]);
+ function navigate(tab,section=null,payload=null,{replace=false}={}){const next={tab,section,payload};setRoute(next);setMenuOpen(false);const fn=replace?'replaceState':'pushState';history[fn]({...(history.state||{}),colibriRoute:next},'',location.href);requestAnimationFrame(()=>scrollTo({top:0,behavior:'smooth'}));}
  const tab=route.tab;
- return <div className="erpShell"><aside className="erpSidebar"><Brand/><nav className="sideNav">{tabs.map(([id,icon,label])=><button className={tab===id?'active':''} onClick={()=>navigate(id)} key={id}><span>{icon}</span><b>{label}</b></button>)}</nav><div className="sidebarFooter"><div className="userAvatar">A</div><div><b>Alfonso</b><small>Gerencia</small></div></div></aside><main className="erpMain"><div className="mobileTop"><Brand/></div><section className="page"><ModuleErrorBoundary key={`${tab}-${route.section||''}-${JSON.stringify(route.payload||{})}`} name={tab}>{tab==='dashboard'&&<Dashboard onNavigate={navigate}/>} {tab==='servicio'&&<CommandCenter initialView={route.section||'plano'} focusAccount={route.payload}/>} {tab==='inteligencia'&&<BusinessIntelligence/>}{tab==='empleados'&&<Employees/>}{tab==='fichajes'&&<ClockPanel/>}{tab==='cuadrantes'&&<Schedule/>}{tab==='comparador'&&<Compare/>}{tab==='tpv'&&<TPV/>}{tab==='gestoria'&&<Gestoria/>}{tab==='rentabilidad'&&<Profitability/>}{tab==='resultado'&&<UnifiedProfitability/>}{tab==='almacen'&&<Inventory/>}{tab==='asistente'&&<BusinessAssistant/>}{tab==='config'&&<Settings/>}</ModuleErrorBoundary></section></main></div>}
+ const activeItem=flatItems.find(x=>x.id===tab)||flatItems[0];
+ const renderNav=(mobile=false)=><nav className={mobile?'appDrawerNav':'sideNav'} aria-label="Módulos de Colibrí ERP">{navGroups.map(group=><section className="navGroup" key={group.id}><h3>{group.label}</h3>{group.items.map(([id,icon,label])=><button type="button" className={tab===id?'active':''} onClick={()=>navigate(id)} key={id}><span aria-hidden="true">{icon}</span><b>{label}</b>{mobile&&<i aria-hidden="true">›</i>}</button>)}</section>)}</nav>;
+ return <div className="erpShell">
+  <aside className="erpSidebar"><Brand/>{renderNav(false)}<div className="sidebarFooter"><div className="userAvatar">A</div><div><b>Alfonso</b><small>Gerencia</small></div></div></aside>
+  <main className="erpMain">
+   <header className="mobileAppBar"><button type="button" className="hamburgerButton" aria-label="Abrir menú" aria-expanded={menuOpen} onClick={()=>setMenuOpen(true)}><span></span><span></span><span></span></button><div className="mobileAppIdentity"><small>{activeItem.group}</small><b>{activeItem.label}</b></div><div className="mobileAppMark" aria-hidden="true">◉</div></header>
+   {menuOpen&&<div className="appDrawerLayer" role="presentation" onClick={()=>setMenuOpen(false)}><aside className="appDrawer" role="dialog" aria-modal="true" aria-label="Navegación principal" onClick={e=>e.stopPropagation()}><div className="appDrawerHeader"><Brand/><button type="button" className="drawerClose" aria-label="Cerrar menú" onClick={()=>setMenuOpen(false)}>×</button></div>{renderNav(true)}<div className="appDrawerUser"><div className="userAvatar">A</div><div><b>Alfonso</b><small>Gerencia · Colibrí ERP 4.5</small></div></div></aside></div>}
+   <section className="page"><ModuleErrorBoundary key={`${tab}-${route.section||''}-${JSON.stringify(route.payload||{})}`} name={tab}>{tab==='dashboard'&&<Dashboard onNavigate={navigate}/>} {tab==='servicio'&&<CommandCenter initialView={route.section||'plano'} focusAccount={route.payload}/>} {tab==='inteligencia'&&<BusinessIntelligence/>}{tab==='empleados'&&<Employees/>}{tab==='fichajes'&&<ClockPanel/>}{tab==='cuadrantes'&&<Schedule/>}{tab==='comparador'&&<Compare/>}{tab==='tpv'&&<TPV/>}{tab==='gestoria'&&<Gestoria/>}{tab==='rentabilidad'&&<Profitability/>}{tab==='resultado'&&<UnifiedProfitability/>}{tab==='almacen'&&<Inventory/>}{tab==='asistente'&&<BusinessAssistant/>}{tab==='config'&&<Settings/>}</ModuleErrorBoundary></section>
+  </main>
+ </div>
+}
 
 function getGreeting(){const h=new Date().getHours();if(h<12)return 'Buenos días';if(h<20)return 'Buenas tardes';return 'Buenas noches'}
 function pctDiff(a,b){a=Number(a||0);b=Number(b||0);if(!b)return null;return ((a-b)/b)*100}

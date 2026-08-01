@@ -1,0 +1,11 @@
+COLIBRÍ ERP 4.5 — VERIFICACIÓN
+
+- Imports locales: verificados, 0 rutas inexistentes.
+- npm ci --no-audit --no-fund: NO completado.
+  Motivo: el proxy npm del entorno devuelve 404 para xlsx-0.18.5.tgz.
+- npm run build: NO completado porque Vite no pudo instalarse.
+- No se afirma que el build haya finalizado correctamente en este entorno.
+
+Comandos para verificar en un entorno con acceso normal a npm:
+  npm ci --no-audit --no-fund
+  npm run build
