@@ -1,0 +1,14 @@
+HOTFIX PERSONAL 4.3 — CONTRASTE + ESTRUCTURA SRC COMPLETA
+
+El error de Vercel "Rollup failed to resolve import /src/main.jsx" apareció porque al subir
+el hotfix visual se sustituyó la carpeta src por una carpeta que solo contenía styles.css.
+
+Este ZIP incluye la carpeta src COMPLETA, ya con el contraste corregido.
+
+SUBIDA DESDE EL MÓVIL
+1. En la rama develop, sustituye la carpeta src COMPLETA por la carpeta src de este ZIP.
+2. No subas únicamente src/styles.css creando una nueva carpeta src vacía.
+3. No borres index.html, public, vercel.json ni .github.
+4. Commit recomendado: Personal 4.3 contraste y estructura src completa
+
+Incluye src/main.jsx, src/App.jsx, src/people-entry.jsx y todos los módulos necesarios.
