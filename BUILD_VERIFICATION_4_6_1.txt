@@ -1,0 +1,9 @@
+COLIBRÍ ERP 4.6.1 — VERIFICACIÓN
+
+- Hotfix aplicado al Centro de decisiones.
+- buildClockSessions se desestructura correctamente mediante { sessions }.
+- La duración de turnos abiertos usa session.start.created_at.
+- Imports locales revisados: 0 rutas inexistentes.
+- npm ci --no-audit --no-fund intentado el 01/08/2026.
+- No pudo completarse porque el proxy npm interno devolvió 404 para xlsx-0.18.5.tgz.
+- Al no instalarse dependencias, npm run build no puede ejecutarse en este entorno.

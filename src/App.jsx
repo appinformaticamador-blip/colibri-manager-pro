@@ -1391,9 +1391,9 @@ function DecisionCenter({onNavigate}){
  const real=state.real||{laborAccrued:0,fixed:0,variable:0,hours:0,details:{}};
  const profit=summary.total-products.cost-Number(real.laborAccrued||0)-Number(real.fixed||0)-Number(real.variable||0);
  const margin=summary.total?profit/summary.total*100:0;
- const sessions=buildClockSessions(state.clocks||[],new Date());
+ const {sessions=[]}=buildClockSessions(state.clocks||[],null,new Date());
  const openSessions=sessions.filter(x=>x.open);
- const tooLong=openSessions.filter(x=>((Date.now()-new Date(x.entry.created_at).getTime())/3600000)>10);
+ const tooLong=openSessions.filter(x=>x.start?.created_at&&((Date.now()-new Date(x.start.created_at).getTime())/3600000)>10);
  const openAccounts=state.service?.open||[];
  const estimatedRevenue=Number(products.estimatedRevenue||0);
  const syncAge=state.sync?.updated_at?(Date.now()-new Date(state.sync.updated_at).getTime())/60000:null;
