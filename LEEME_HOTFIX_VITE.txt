@@ -1,0 +1,18 @@
+HOTFIX VITE — RESTAURAR ESTRUCTURA SRC
+
+El último reemplazo dejó en GitHub únicamente src/App.jsx.
+Por eso Vercel no encuentra /src/main.jsx.
+
+Este ZIP NO sustituye src/App.jsx. Conserva la versión actual con el hotfix
+slugName y restaura solamente los archivos que faltan.
+
+Sube a la rama develop respetando exactamente las rutas:
+- src/main.jsx
+- src/people-entry.jsx
+- src/styles.css
+- src/profitability-rc392.css
+- src/modules/people/*
+- src/modules/profitability/*
+
+No borres src/App.jsx.
+No es necesario volver a subir App.jsx de la raíz.
