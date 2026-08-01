@@ -1,0 +1,9 @@
+HOTFIX EMPLEADOS — slugName
+
+Reemplaza estos archivos respetando exactamente sus rutas:
+
+1) src/App.jsx  -> ruta principal usada por Vite
+2) App.jsx      -> copia espejo de seguridad del repositorio
+
+La corrección mueve slugName al ámbito global para que Empleados, Fichajes y Cuadrantes puedan usarla.
+No borres datos locales ni pulses "Reiniciar datos locales de cuadrante" por este error.

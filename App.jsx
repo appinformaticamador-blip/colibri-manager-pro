@@ -26,6 +26,7 @@ function h(slot){const [a,b]=slot.split('-');const [ah,am]=a.split(':').map(Numb
 function dist(lat1,lon1,lat2,lon2){const R=6371000,dLat=(lat2-lat1)*Math.PI/180,dLon=(lon2-lon1)*Math.PI/180;const a=Math.sin(dLat/2)**2+Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2;return 2*R*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));}
 function today(){return new Date().toISOString().slice(0,10)}
 function week(){const d=new Date();const y=d.getFullYear();const onejan=new Date(y,0,1);return `${y}-W${String(Math.ceil((((d-onejan)/86400000)+onejan.getDay()+1)/7)).padStart(2,'0')}`}
+function slugName(name){return String(name||'').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'')}
 
 function readLocalJSON(key,fallback){
  try{
@@ -758,8 +759,7 @@ function Schedule(){
   {id:'prueba',name:'PRUEBA',category:'Refuerzo',color:'#26c6da'}
  ];
  function emptyWeek(){const w={};DAYS.forEach(d=>{w[d]={};SLOTS.forEach(s=>w[d][s]=[])});return w}
- function slugName(name){return String(name||'').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'')}
- function normalizeEmployeeId(id){return id==='ivan'?'kathy':id}
+  function normalizeEmployeeId(id){return id==='ivan'?'kathy':id}
  function normalizeEmployees(list){
   const source=Array.isArray(list)?list:[];
   const byKey=new Map();
