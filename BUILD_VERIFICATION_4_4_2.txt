@@ -1,0 +1,11 @@
+COLIBRÍ ERP 4.4.2
+
+Comandos ejecutados:
+1. npm ci --no-audit --no-fund
+   Resultado: ERROR 404 del registro interno al descargar xlsx-0.18.5.tgz.
+2. npm run build
+   Resultado: vite: not found, consecuencia de no completarse npm ci.
+3. Revisión automatizada de imports locales
+   Resultado: correcta; ningún import local apunta a un archivo inexistente.
+
+No se afirma que el build Vite haya finalizado correctamente en este entorno.
