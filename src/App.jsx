@@ -1358,12 +1358,87 @@ function UnifiedProfitability(){
 function App(){const host=location.hostname;const onlyClock=host.startsWith('fichar.')||location.pathname.includes('fichar');const [authed,setAuthed]=useState(false);return <>{onlyClock?<PeoplePortal supabase={supabase} Brand={Brand}/>:<>{!authed?<Login onOk={()=>setAuthed(true)}/>:<Manager/>}</>}</>}
 function Login({onOk}){const[pin,setPin]=useState('');return <main className="login"><Brand/><div className="card narrow"><h2>Acceso Manager</h2><input placeholder="Clave gerente" type="password" value={pin} onChange={e=>setPin(e.target.value)}/><button onClick={()=>pin===ADMIN_PIN?onOk():alert('Clave incorrecta')}>Entrar</button><a href="/fichar" className="muted">Ir a fichaje empleados</a></div></main>}
 function Brand(){return <div className="brand"><div className="brandMark"><img src="/colibri-brand.png" onError={e=>e.currentTarget.style.display='none'}/></div><div><h1>Colibrí <span>ERP</span></h1><p>Brasería El Colibrí</p></div></div>}
+
+function DecisionCenter({onNavigate}){
+ const [date,setDate]=useState(today());
+ const [state,setState]=useState({loading:true,error:null,tickets:[],lines:[],costMap:new Map(),real:null,service:{open:[]},sync:null,clocks:[],employees:[],closure:null});
+ const [resolved,setResolved]=useState(()=>readLocalJSON('colibri46_resolved_alerts',{}));
+ const [audit,setAudit]=useState(()=>readLocalJSON('colibri46_decision_audit',[]));
+ const [checks,setChecks]=useState(()=>readLocalJSON(`colibri46_close_checks_${today()}`,{}));
+ const [goals,setGoals]=useState(()=>readLocalJSON('colibri46_business_goals',{dailySales:700,minMargin:25,maxLaborPct:25,minTicket:10,monthlyProfit:6000}));
+ useEffect(()=>{load()},[date]);
+ useEffect(()=>localStorage.setItem('colibri46_resolved_alerts',JSON.stringify(resolved)),[resolved]);
+ useEffect(()=>localStorage.setItem('colibri46_decision_audit',JSON.stringify(audit.slice(0,300))),[audit]);
+ useEffect(()=>localStorage.setItem(`colibri46_close_checks_${date}`,JSON.stringify(checks)),[checks,date]);
+ useEffect(()=>localStorage.setItem('colibri46_business_goals',JSON.stringify(goals)),[goals]);
+ async function load(){
+  if(!supabase){setState(s=>({...s,loading:false,error:'Supabase no configurado'}));return}
+  setState(s=>({...s,loading:true,error:null}));
+  try{
+   const to=addDays(date,1),start=date+'T00:00:00',end=to+'T00:00:00';
+   const [{tickets,lines},costMap,service,sync,clockRes,employeeRes,closure]=await Promise.all([
+    loadSalesRange(date,to),loadProfitabilityCostMap(),date===today()?loadServiceState():Promise.resolve({open:[]}),loadSyncStatus(),
+    supabase.from('clock_records').select('*').gte('created_at',start).lt('created_at',end).order('created_at',{ascending:true}).limit(3000),
+    supabase.from('employees').select('*').eq('active',true).limit(500),loadCashClosure(date)
+   ]);
+   const clocks=clockRes.data||[],employees=employeeRes.data||[];
+   const real=await loadRealProfitability(supabase,date,to,clocks);
+   setState({loading:false,error:null,tickets,lines,costMap,real,service,sync,clocks,employees,closure});
+  }catch(e){setState(s=>({...s,loading:false,error:e.message||String(e)}))}
+ }
+ const summary=summarizeTickets((state.tickets||[]).filter(t=>!['X','G'].includes(String(t.estado||'C').toUpperCase())));
+ const products=periodFinancials(state.lines||[],state.costMap||new Map());
+ const real=state.real||{laborAccrued:0,fixed:0,variable:0,hours:0,details:{}};
+ const profit=summary.total-products.cost-Number(real.laborAccrued||0)-Number(real.fixed||0)-Number(real.variable||0);
+ const margin=summary.total?profit/summary.total*100:0;
+ const sessions=buildClockSessions(state.clocks||[],new Date());
+ const openSessions=sessions.filter(x=>x.open);
+ const tooLong=openSessions.filter(x=>((Date.now()-new Date(x.entry.created_at).getTime())/3600000)>10);
+ const openAccounts=state.service?.open||[];
+ const estimatedRevenue=Number(products.estimatedRevenue||0);
+ const syncAge=state.sync?.updated_at?(Date.now()-new Date(state.sync.updated_at).getTime())/60000:null;
+ const alerts=[];
+ if(!state.closure)alerts.push({id:`closure-${date}`,tone:'critical',title:'Cierre de caja pendiente',text:'El día todavía no tiene cierre registrado.',impact:'Cierre',tab:'tpv'});
+ if(openAccounts.length)alerts.push({id:`accounts-${date}`,tone:openAccounts.some(x=>minutesOpen(x.opened_at)>90)?'critical':'warning',title:`${openAccounts.length} cuentas abiertas`,text:`Importe pendiente: ${money(openAccounts.reduce((a,x)=>a+Number(x.total||0),0))}.`,impact:'Operación',tab:'servicio'});
+ if(tooLong.length)alerts.push({id:`clocks-${date}`,tone:'critical',title:`${tooLong.length} turnos abiertos demasiado tiempo`,text:tooLong.map(x=>x.employee_name||x.employee_id).join(', '),impact:'Personal',tab:'fichajes'});
+ else if(openSessions.length)alerts.push({id:`openclocks-${date}`,tone:'info',title:`${openSessions.length} empleados trabajando`,text:'Revisa que los turnos abiertos correspondan al personal presente.',impact:'Personal',tab:'fichajes'});
+ if(estimatedRevenue>0)alerts.push({id:`costs-${date}`,tone:'warning',title:'Productos con coste provisional',text:`${money(estimatedRevenue)} de venta usa estimación de 1/3 del PVP.`,impact:'Rentabilidad',tab:'rentabilidad'});
+ if(syncAge===null||syncAge>10)alerts.push({id:`sync-${date}`,tone:'critical',title:'Sincronización detenida o antigua',text:syncAge===null?'No hay estado reciente de Colibrí Sync.':`Última actualización hace ${Math.round(syncAge)} minutos.`,impact:'Datos',tab:'config'});
+ if(Number(real.variable||0)===0&&summary.total>0)alerts.push({id:`variables-${date}`,tone:'info',title:'Sin gastos variables registrados',text:'Confirma que no hubo compras, retiradas o imprevistos.',impact:'Gastos',tab:'resultado'});
+ const pending=alerts.filter(a=>!resolved[a.id]);
+ const costCoverage=summary.total?Math.max(0,100-(estimatedRevenue/summary.total*100)):100;
+ const laborQuality=real.laborSource==='clock_records'?100:(Number(real.hours||0)>0?65:35);
+ const closureQuality=state.closure?100:55;
+ const syncQuality=syncAge!==null&&syncAge<=10?100:50;
+ const expenseQuality=Number(real.fixed||0)>0?100:70;
+ const reliability=Math.round(costCoverage*.35+laborQuality*.25+closureQuality*.15+syncQuality*.15+expenseQuality*.10);
+ const reliabilityTone=reliability>=90?'good':reliability>=75?'warn':'bad';
+ const goalSales=Number(goals.dailySales||0),goalMargin=Number(goals.minMargin||0),laborPct=summary.total?Number(real.laborAccrued||0)/summary.total*100:0;
+ const currentHour=Math.max(1,new Date().getHours()-8);const projected=summary.total/currentHour*15;
+ const closeItems=[
+  ['sales','Ventas válidas revisadas',summary.total>0],['payments','Formas de pago revisadas',summary.total>0],['accounts','No quedan cuentas abiertas',openAccounts.length===0],['clocks','Fichajes cerrados o justificados',openSessions.length===0],['costs','Costes provisionales revisados',estimatedRevenue===0],['expenses','Gastos y retiradas registrados',Number(real.variable||0)>0||summary.total===0],['sync','Sincronización actualizada',syncAge!==null&&syncAge<=10]
+ ];
+ function resolveAlert(a){const next={...resolved,[a.id]:{at:new Date().toISOString(),title:a.title}};setResolved(next);setAudit(v=>[{at:new Date().toISOString(),action:'Alerta revisada',detail:a.title,user:'Gerencia'},...v])}
+ function toggleCheck(id){setChecks(v=>({...v,[id]:!v[id]}))}
+ function finishGuidedClose(){const incomplete=closeItems.filter(([id,,auto])=>!(auto||checks[id]));if(incomplete.length)return alert(`Quedan ${incomplete.length} comprobaciones pendientes.`);const row={at:new Date().toISOString(),action:'Cierre guiado completado',detail:`${date} · ventas ${money(summary.total)} · beneficio ${money(profit)} · fiabilidad ${reliability}%`,user:'Gerencia'};setAudit(v=>[row,...v]);localStorage.setItem(`colibri46_guided_close_${date}`,JSON.stringify(row));alert('Revisión guiada completada. Ahora puedes registrar el cierre definitivo en TPV y caja.')}
+ return <div className="decision46">
+  <div className="card decisionHero"><div><span className="sectionEyebrow">COLIBRÍ ERP 4.6 · CONTROL Y DECISIONES</span><h2>Centro de decisiones</h2><p>Problemas accionables, calidad del dato, objetivos y cierre diario en una sola pantalla.</p></div><div className="row"><input type="date" value={date} onChange={e=>{setDate(e.target.value);setChecks(readLocalJSON(`colibri46_close_checks_${e.target.value}`,{}))}}/><button onClick={load}>{state.loading?'Actualizando…':'Actualizar'}</button></div></div>
+  {state.error&&<div className="alertBad">{state.error}</div>}
+  <div className="decisionKpis"><article><span>Ventas</span><b>{money(summary.total)}</b><small>{summary.tickets} tickets</small></article><article><span>Beneficio real</span><b className={profit>=0?'ok':'bad'}>{money(profit)}</b><small>{margin.toFixed(1)}% margen</small></article><article><span>Fiabilidad del dato</span><b className={reliabilityTone}>{reliability}%</b><small>{reliability>=90?'Resultado muy fiable':reliability>=75?'Hay datos estimados':'Revisión necesaria'}</small></article><article><span>Pendientes</span><b>{pending.length}</b><small>{alerts.length-pending.length} revisados</small></article></div>
+  <div className="decisionLayout"><section className="card"><div className="row between"><div><h2>Pendientes de hoy</h2><p className="mutedText">Solo incidencias que requieren una decisión.</p></div><span className="decisionCount">{pending.length}</span></div><div className="decisionAlerts">{pending.map(a=><article className={a.tone} key={a.id}><div><span>{a.impact}</span><h3>{a.title}</h3><p>{a.text}</p></div><div className="decisionActions"><button onClick={()=>onNavigate(a.tab)}>Corregir</button><button className="ghost" onClick={()=>resolveAlert(a)}>Revisado</button></div></article>)}{!pending.length&&<div className="decisionEmpty"><b>Todo revisado</b><p>No hay incidencias pendientes para este periodo.</p></div>}</div></section>
+  <section className="card reliabilityCard"><h2>Calidad del resultado</h2>{[['Costes de producto',costCoverage],['Personal',laborQuality],['Cierre de caja',closureQuality],['Sincronización',syncQuality],['Gastos fijos',expenseQuality]].map(([l,v])=><div className="qualityRow" key={l}><span>{l}</span><div><i style={{width:`${v}%`}}></i></div><b>{Math.round(v)}%</b></div>)}<p className="mutedText">La cifra de beneficio sigue siendo estimada mientras existan costes provisionales, cuadrantes usados como respaldo o cierres pendientes.</p></section></div>
+  <div className="decisionLayout"><section className="card guidedClose"><h2>Cierre diario guiado</h2><p className="mutedText">Completa la revisión antes de registrar el cierre definitivo.</p>{closeItems.map(([id,label,auto])=>{const done=auto||checks[id];return <button className={done?'done':''} onClick={()=>!auto&&toggleCheck(id)} key={id}><span>{done?'✓':'○'}</span><b>{label}</b><small>{auto?'Comprobado automáticamente':'Confirmación manual'}</small></button>})}<div className="row"><button onClick={finishGuidedClose}>Completar revisión guiada</button><button className="ghost" onClick={()=>onNavigate('tpv')}>Ir a TPV y caja</button></div></section>
+  <section className="card goalCard"><h2>Objetivos y previsión</h2><div className="goalForm"><label>Venta diaria<input type="number" value={goals.dailySales} onChange={e=>setGoals({...goals,dailySales:e.target.value})}/></label><label>Margen mínimo %<input type="number" value={goals.minMargin} onChange={e=>setGoals({...goals,minMargin:e.target.value})}/></label><label>Personal máximo %<input type="number" value={goals.maxLaborPct} onChange={e=>setGoals({...goals,maxLaborPct:e.target.value})}/></label><label>Ticket medio mínimo<input type="number" value={goals.minTicket} onChange={e=>setGoals({...goals,minTicket:e.target.value})}/></label></div><div className="goalResults"><p><span>Objetivo de venta</span><b>{goalSales?`${Math.min(100,summary.total/goalSales*100).toFixed(0)}%`: '—'}</b></p><p><span>Previsión de cierre</span><b>{money(projected)}</b></p><p><span>Margen real</span><b className={margin>=goalMargin?'ok':'bad'}>{margin.toFixed(1)}%</b></p><p><span>Personal / ventas</span><b className={laborPct<=Number(goals.maxLaborPct||0)?'ok':'bad'}>{laborPct.toFixed(1)}%</b></p></div><div className="decisionAdvice">{summary.total<goalSales*.75?`La venta está por debajo del ritmo objetivo. Previsión actual: ${money(projected)}.`:margin<goalMargin?`La venta avanza, pero el margen está ${Math.abs(margin-goalMargin).toFixed(1)} puntos por debajo del objetivo.`:laborPct>Number(goals.maxLaborPct||0)?'El coste de personal está por encima del límite definido.':'Ritmo y márgenes dentro de los objetivos configurados.'}</div></section></div>
+  <section className="card auditCard"><div className="row between"><div><h2>Historial de decisiones</h2><p className="mutedText">Registro local de revisiones y cierres guiados.</p></div><button className="ghost" onClick={()=>{if(confirm('¿Borrar el historial de decisiones?'))setAudit([])}}>Limpiar</button></div>{audit.slice(0,20).map((x,i)=><p key={i}><span>{new Date(x.at).toLocaleString('es-ES')}</span><b>{x.action}</b><small>{x.detail}</small></p>)}{!audit.length&&<p>Sin acciones registradas todavía.</p>}</section>
+ </div>
+}
+
 function Manager(){
  const initial=history.state?.colibriRoute||{tab:'dashboard',section:null,payload:null};
  const[route,setRoute]=useState(initial);
  const[menuOpen,setMenuOpen]=useState(false);
  const navGroups=[
-  {id:'inicio',label:'Inicio',items:[['dashboard','⌂','Dashboard']]},
+  {id:'inicio',label:'Inicio',items:[['dashboard','⌂','Dashboard'],['decisiones','✓','Centro de decisiones']]},
   {id:'operacion',label:'Operación',items:[['servicio','◉','Operación en directo'],['tpv','▣','TPV y caja']]},
   {id:'finanzas',label:'Finanzas',items:[['resultado','◎','Resultado real'],['rentabilidad','€','Productos, costes y gastos']]},
   {id:'personal',label:'Personal',items:[['empleados','♟','Plantilla'],['fichajes','◷','Fichajes'],['cuadrantes','▦','Cuadrantes'],['comparador','⇄','Comparador']]},
@@ -1381,8 +1456,8 @@ function Manager(){
   <aside className="erpSidebar"><Brand/>{renderNav(false)}<div className="sidebarFooter"><div className="userAvatar">A</div><div><b>Alfonso</b><small>Gerencia</small></div></div></aside>
   <main className="erpMain">
    <header className="mobileAppBar"><button type="button" className="hamburgerButton" aria-label="Abrir menú" aria-expanded={menuOpen} onClick={()=>setMenuOpen(true)}><span></span><span></span><span></span></button><div className="mobileAppIdentity"><small>{activeItem.group}</small><b>{activeItem.label}</b></div><div className="mobileAppMark" aria-hidden="true">◉</div></header>
-   {menuOpen&&<div className="appDrawerLayer" role="presentation" onClick={()=>setMenuOpen(false)}><aside className="appDrawer" role="dialog" aria-modal="true" aria-label="Navegación principal" onClick={e=>e.stopPropagation()}><div className="appDrawerHeader"><Brand/><button type="button" className="drawerClose" aria-label="Cerrar menú" onClick={()=>setMenuOpen(false)}>×</button></div>{renderNav(true)}<div className="appDrawerUser"><div className="userAvatar">A</div><div><b>Alfonso</b><small>Gerencia · Colibrí ERP 4.5</small></div></div></aside></div>}
-   <section className="page"><ModuleErrorBoundary key={`${tab}-${route.section||''}-${JSON.stringify(route.payload||{})}`} name={tab}>{tab==='dashboard'&&<Dashboard onNavigate={navigate}/>} {tab==='servicio'&&<CommandCenter initialView={route.section||'plano'} focusAccount={route.payload}/>} {tab==='inteligencia'&&<BusinessIntelligence/>}{tab==='empleados'&&<Employees/>}{tab==='fichajes'&&<ClockPanel/>}{tab==='cuadrantes'&&<Schedule/>}{tab==='comparador'&&<Compare/>}{tab==='tpv'&&<TPV/>}{tab==='gestoria'&&<Gestoria/>}{tab==='rentabilidad'&&<Profitability/>}{tab==='resultado'&&<UnifiedProfitability/>}{tab==='almacen'&&<Inventory/>}{tab==='asistente'&&<BusinessAssistant/>}{tab==='config'&&<Settings/>}</ModuleErrorBoundary></section>
+   {menuOpen&&<div className="appDrawerLayer" role="presentation" onClick={()=>setMenuOpen(false)}><aside className="appDrawer" role="dialog" aria-modal="true" aria-label="Navegación principal" onClick={e=>e.stopPropagation()}><div className="appDrawerHeader"><Brand/><button type="button" className="drawerClose" aria-label="Cerrar menú" onClick={()=>setMenuOpen(false)}>×</button></div>{renderNav(true)}<div className="appDrawerUser"><div className="userAvatar">A</div><div><b>Alfonso</b><small>Gerencia · Colibrí ERP 4.6</small></div></div></aside></div>}
+   <section className="page"><ModuleErrorBoundary key={`${tab}-${route.section||''}-${JSON.stringify(route.payload||{})}`} name={tab}>{tab==='dashboard'&&<Dashboard onNavigate={navigate}/>} {tab==='decisiones'&&<DecisionCenter onNavigate={navigate}/>} {tab==='servicio'&&<CommandCenter initialView={route.section||'plano'} focusAccount={route.payload}/>} {tab==='inteligencia'&&<BusinessIntelligence/>}{tab==='empleados'&&<Employees/>}{tab==='fichajes'&&<ClockPanel/>}{tab==='cuadrantes'&&<Schedule/>}{tab==='comparador'&&<Compare/>}{tab==='tpv'&&<TPV/>}{tab==='gestoria'&&<Gestoria/>}{tab==='rentabilidad'&&<Profitability/>}{tab==='resultado'&&<UnifiedProfitability/>}{tab==='almacen'&&<Inventory/>}{tab==='asistente'&&<BusinessAssistant/>}{tab==='config'&&<Settings/>}</ModuleErrorBoundary></section>
   </main>
  </div>
 }

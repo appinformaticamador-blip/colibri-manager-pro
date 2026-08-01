@@ -1,0 +1,26 @@
+COLIBRÍ ERP 4.6 · VERIFICACIÓN
+Fecha: 2026-08-01
+
+Comprobaciones completadas:
+- package.json y package-lock.json: JSON válido.
+- Imports locales: 0 rutas inexistentes.
+- Validación de sintaxis JSX/JavaScript con TypeScript 5.8.3: sin errores.
+- Versión: 4.6.0.
+
+Instalación ejecutada:
+npm ci --no-audit --no-fund
+
+Resultado:
+No completada por error 404 del proxy npm del entorno al descargar xlsx-0.18.5.tgz.
+
+Build ejecutado:
+npm run build
+
+Resultado del build:
+
+> colibri-manager-pro@4.6.0 build
+> vite build
+
+sh: 1: vite: not found
+
+No se afirma que el build Vite se haya completado. La limitación procede de la imposibilidad de instalar las dependencias desde el proxy npm del entorno.
