@@ -1,0 +1,15 @@
+COLIBRÍ ERP 4.7 · VERIFICACIÓN
+
+- Versión: 4.7.0
+- Fuente: COLIBRI ERP 4.6.1 completo.
+- Sintaxis de src/App.jsx validada con TypeScript transpileModule: 0 errores.
+- Imports locales comprobados: 0 rutas inexistentes.
+- Formato de archivo de cobros validado contra informe-ventas-2026-08-02_2026-08-02.xlsx:
+  Fecha, Tipo, ID de transacción, Forma de pago, Precio bruto/neto y Cuenta.
+- npm ci --no-audit --no-fund: NO completado.
+  Motivo: el proxy npm del entorno devolvió 404 para xlsx-0.18.5.tgz.
+- npm run build: no ejecutable sin dependencias instaladas.
+
+Comandos para verificar en un entorno con acceso normal a npm:
+  npm ci --no-audit --no-fund
+  npm run build
