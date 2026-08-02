@@ -1,0 +1,9 @@
+COLIBRÍ ERP 4.7.1 · VERIFICACIÓN
+
+- Sintaxis src/App.jsx validada con TypeScript transpileModule: 0 errores.
+- Imports locales revisados: 0 rutas inexistentes.
+- npm ci --no-audit --no-fund ejecutado.
+- Resultado npm ci: bloqueado por error 404 del registro interno al descargar xlsx-0.18.5.tgz.
+- npm run build no se ejecutó porque las dependencias no pudieron instalarse.
+
+No se afirma que el build Vite esté verificado en este entorno.
