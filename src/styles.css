@@ -1216,3 +1216,35 @@ body{padding:0!important;margin:0!important}
 /* COLIBRÍ ERP 4.7.1 · conciliación clara y pagos múltiples */
 .paymentMatchClear{grid-template-columns:minmax(0,1fr);gap:14px;padding:18px}.paymentMatchClear .paymentMatchStatus{display:grid;gap:5px}.paymentMatchClear .paymentMatchStatus strong{font-size:1.18rem;color:#28246f}.paymentMatchClear .paymentMatchStatus small{font-size:.92rem;line-height:1.45;color:#566579}.paymentSource{display:grid;gap:4px;padding:15px;border-radius:17px;border:1px solid #dce8eb;background:#fff}.paymentSource span,.paymentConclusion span{font-size:.72rem;letter-spacing:.08em;font-weight:950;color:#637386}.paymentSource b{font-size:1.08rem;color:#28246f}.paymentSource strong{font-size:1.7rem;color:#122033}.paymentSource small{line-height:1.45;color:#657487}.numierSource{background:#f4f7ff;border-color:#d7dcf2}.sumupSource{background:#f1fbf7;border-color:#cfe9df}.paymentArrow{display:grid;place-items:center;width:42px;height:42px;margin:-7px auto;border-radius:50%;background:#e5f4f1;color:#087866;font-size:1.35rem;font-weight:950}.paymentConclusion{display:grid;gap:5px;padding:14px 15px;border-radius:15px;background:#f7fafb;border:1px solid #dce7ea}.paymentConclusion b{color:#172033;font-size:1.05rem}.paymentMatchClear>button{width:100%;margin-top:2px}.paymentMatchClear.ok .paymentConclusion{background:#eaf8f1;border-color:#bfe4cf}.paymentMatchClear.warn .paymentConclusion{background:#fff7df;border-color:#eed38e}.paymentMatchClear.bad .paymentConclusion{background:#fff0ef;border-color:#efbbb5}
 @media(min-width:900px){.paymentMatchClear{grid-template-columns:minmax(180px,.8fr) minmax(220px,1fr) 48px minmax(220px,1fr) minmax(190px,.8fr) auto;align-items:center}.paymentMatchClear .paymentMatchStatus{grid-column:1/-1}.paymentMatchClear .paymentArrow{margin:0}.paymentMatchClear>button{width:auto;white-space:nowrap}}
+
+
+/* COLIBRÍ ERP 4.7.2 · contraste fijo en cabeceras de conciliación */
+.paymentMatchStatus{
+  position:static !important;
+  top:auto !important;
+  z-index:auto !important;
+  padding:0 !important;
+  margin:0 !important;
+  background:transparent !important;
+  color:inherit !important;
+  box-shadow:none !important;
+  border:0 !important;
+}
+.paymentMatchClear .paymentMatchStatus{
+  display:grid;
+  gap:8px;
+  padding:0 !important;
+  background:transparent !important;
+}
+.paymentMatchClear .paymentMatchStatus strong{
+  display:block;
+  color:#28246f !important;
+  font-size:1.2rem;
+  line-height:1.2;
+}
+.paymentMatchClear .paymentMatchStatus small{
+  display:block;
+  color:#46586d !important;
+  font-size:.98rem;
+  line-height:1.5;
+}
