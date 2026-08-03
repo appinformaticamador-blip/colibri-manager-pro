@@ -328,23 +328,23 @@ public sealed class ColibriSyncApp
             {
                 LastSuccessfulAuditDate = DateTime.Today.ToString("yyyy-MM-dd"),
                 CompletedAt = DateTime.Now.ToString("O"),
-                TicketsReviewed = totalCobrados,
+                TicketsReviewed = totalCabecerasResultado,
                 TicketsRecovered = missingTickets.Count
             };
             auditState.Save();
-            Log($"Auditoría diaria completada. Revisados: {totalCobrados:N0}; recuperados: {missingTickets.Count:N0}.");
+            Log($"Auditoría diaria completada. Revisados: {totalCabecerasResultado:N0}; recuperados: {missingTickets.Count:N0}.");
         }
 
         sw.Stop();
-        long processed = Math.Max(0, totalCobrados - remaining);
-        decimal pct = totalCobrados == 0 ? 100m : Math.Round((decimal)processed * 100m / totalCobrados, 2);
+        long processed = Math.Max(0, totalCabecerasResultado - remaining);
+        decimal pct = totalCabecerasResultado == 0 ? 100m : Math.Round((decimal)processed * 100m / totalCabecerasResultado, 2);
         await api.UpsertSyncStatusAsync(new SyncStatusDto
         {
             BusinessName = _config.BusinessName,
             Mode = remaining == 0 ? "LIVE" : "SINCRONIZANDO",
             ProgressPercent = pct,
             ProcessedTickets = processed,
-            TotalTickets = totalCobrados,
+            TotalTickets = totalCabecerasResultado,
             PendingTickets = remaining,
             LastCabId = missingTickets.Count > 0 ? missingTickets.Max(t => t.CabId) : lastCabId,
             MaxCabId = maxCabSeen,
