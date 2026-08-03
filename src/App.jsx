@@ -44,12 +44,13 @@ function addDays(dateStr,n){const d=new Date(dateStr+'T12:00:00');d.setDate(d.ge
 async function loadSalesForDate(date){
  if(!supabase)return {daily:null,tickets:[],lines:[],sync:null,error:'Supabase no configurado'};
  const start=date+'T00:00:00'; const end=addDays(date,1)+'T00:00:00';
- const [{data:dailyData},{data:ticketsData,error:ticketError},{data:syncData}] = await Promise.all([
+ const [{data:dailyData},{data:ticketsData,error:ticketError},{data:auditExpenseData},{data:syncData}] = await Promise.all([
   supabase.from('numier_daily_sales').select('*').eq('fecha',date).maybeSingle(),
   supabase.from('numier_tickets').select('*').gte('hora',start).lt('hora',end).order('hora',{ascending:true}).limit(5000),
+  supabase.from('numier_audit_events').select('*').eq('estado','G').gte('hora',start).lt('hora',end).order('hora',{ascending:true}).limit(5000),
   supabase.from('numier_sync_files').select('*').order('synced_at',{ascending:false}).limit(1)
  ]);
- const tickets=ticketsData||[];const saleTickets=tickets.filter(isRealSaleTicket);const expenseTickets=tickets.filter(isNumierExpenseTicket);const numierExpenses=summarizeNumierExpenses(expenseTickets);
+ const tickets=ticketsData||[];const saleTickets=tickets.filter(isRealSaleTicket);const expenseTickets=mergeNumierExpenseSources(tickets,auditExpenseData);const numierExpenses=summarizeNumierExpenses(expenseTickets);
  let daily=dailyData;
  if(!daily){
   const saleSummary=summarizeTickets(saleTickets);
@@ -171,6 +172,15 @@ function summarizeNumierExpenses(tickets){
  const rows=(tickets||[]).filter(isNumierExpenseTicket);
  return {total:rows.reduce((sum,t)=>sum+numierExpenseAmount(t),0),count:rows.length,rows};
 }
+function mergeNumierExpenseSources(tickets,auditRows){
+ const merged=new Map();
+ for(const row of [...(tickets||[]),...(auditRows||[])]){
+  if(!isNumierExpenseTicket(row))continue;
+  const key=String(row.cab_id||row.id||`${row.hora||''}|${row.numdoc||''}|${row.total||0}`);
+  if(!merged.has(key))merged.set(key,{...row,estado:'G'});
+ }
+ return [...merged.values()];
+}
 function normalizePeriodLines(tickets,rawLines){
  const ticketByCab=new Map((tickets||[]).map(t=>[String(t.cab_id),t]));
  const grouped=new Map();
@@ -182,12 +192,13 @@ function normalizePeriodLines(tickets,rawLines){
 async function loadSalesRange(from,to){
  if(!supabase)return {tickets:[],lines:[],sync:null,articles:new Map()};
  const start=from+'T00:00:00'; const end=to+'T00:00:00';
- const [{data:ticketsData},{data:syncData},articles]=await Promise.all([
+ const [{data:ticketsData},{data:auditExpenseData},{data:syncData},articles]=await Promise.all([
   supabase.from('numier_tickets').select('*').gte('hora',start).lt('hora',end).order('hora',{ascending:true}).limit(10000),
+  supabase.from('numier_audit_events').select('*').eq('estado','G').gte('hora',start).lt('hora',end).order('hora',{ascending:true}).limit(10000),
   supabase.from('numier_sync_files').select('*').order('synced_at',{ascending:false}).limit(1),
   loadArticlesMap()
  ]);
- const allTickets=ticketsData||[];const tickets=allTickets.filter(isRealSaleTicket);const expenseTickets=allTickets.filter(isNumierExpenseTicket);const numierExpenses=summarizeNumierExpenses(expenseTickets); const cabIds=tickets.map(t=>t.cab_id).filter(Boolean); let rawLines=[];
+ const allTickets=ticketsData||[];const tickets=allTickets.filter(isRealSaleTicket);const expenseTickets=mergeNumierExpenseSources(allTickets,auditExpenseData);const numierExpenses=summarizeNumierExpenses(expenseTickets); const cabIds=tickets.map(t=>t.cab_id).filter(Boolean); let rawLines=[];
  for(let i=0;i<cabIds.length;i+=200){const chunk=cabIds.slice(i,i+200);const {data}=await supabase.from('numier_ticket_lines').select('*').in('cab_id',chunk).order('line_key',{ascending:true}).limit(10000);if(data)rawLines=rawLines.concat(data);}
  const lines=normalizePeriodLines(tickets,rawLines);
  return {tickets,lines,expenseTickets,numierExpenses,sync:syncData?.[0]||null,articles};
@@ -254,7 +265,10 @@ async function loadSalesRangeGestoria(from,to,onProgress=null){
  const start=from+'T00:00:00'; const end=to+'T00:00:00';
  onProgress&&onProgress('Cargando tickets del periodo completo...');
  const tickets=await fetchAllPages(()=>supabase.from('numier_tickets').select('*').gte('hora',start).lt('hora',end).order('numdoc',{ascending:true}),1000,onProgress,'tickets');
- const cabIds=tickets.map(t=>t.cab_id).filter(Boolean);
+ const auditExpenses=await fetchAllPages(()=>supabase.from('numier_audit_events').select('*').eq('estado','G').gte('hora',start).lt('hora',end).order('hora',{ascending:true}),1000,onProgress,'gastos Numier');
+ const mergedExpenses=mergeNumierExpenseSources(tickets,auditExpenses);
+ const combinedTickets=[...tickets.filter(t=>!isNumierExpenseTicket(t)),...mergedExpenses];
+ const cabIds=tickets.filter(isRealSaleTicket).map(t=>t.cab_id).filter(Boolean);
  let lines=[];
  onProgress&&onProgress(`Cargando líneas de ${cabIds.length.toLocaleString('es-ES')} tickets...`);
  for(let i=0;i<cabIds.length;i+=80){
@@ -268,7 +282,7 @@ async function loadSalesRangeGestoria(from,to,onProgress=null){
   loadArticlesMap()
  ]);
  onProgress&&onProgress(`Completado: ${tickets.length.toLocaleString('es-ES')} tickets y ${lines.length.toLocaleString('es-ES')} líneas.`);
- return {tickets,lines,sync:syncData?.[0]||null,articles};
+ return {tickets:combinedTickets,expenseTickets:mergedExpenses,numierExpenses:summarizeNumierExpenses(mergedExpenses),lines,sync:syncData?.[0]||null,articles};
 }
 function ticketOrderKey(t){
  const raw=String(t.numdoc||t.numero||t.cab_id||'');

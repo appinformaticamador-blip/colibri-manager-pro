@@ -221,7 +221,7 @@ public sealed class ColibriSyncApp
             long cabId = rec.GetLong("CAB_ID");
             maxCabSeen = Math.Max(maxCabSeen, cabId);
             string estado = FirstNonEmpty(rec.GetString("CAB_ESTADO"), rec.GetString("CAB_EST"));
-            if (!estado.Equals("C", StringComparison.OrdinalIgnoreCase)) continue;
+            if (!(estado.Equals("C", StringComparison.OrdinalIgnoreCase) || estado.Equals("G", StringComparison.OrdinalIgnoreCase))) continue;
 
             var fecha = rec.GetDate("CAB_FECHA") ?? DateTime.Today;
             var hora = rec.GetVfpDateTime("CAB_HORA") ?? fecha;
@@ -253,9 +253,9 @@ public sealed class ColibriSyncApp
             .Take(_config.MaxTicketsPerSync)
             .ToList();
 
-        int totalCobrados = candidates.Count;
+        int totalCabecerasResultado = candidates.Count;
         int missingInScope = scope.Count(t => !existingIds.Contains(t.CabId));
-        Log($"Cabeceras escaneadas: {scanned:N0}. Cobrados: {totalCobrados:N0}. Ámbito verificado: {scope.Count:N0}. Faltantes detectados: {missingInScope:N0}.");
+        Log($"Cabeceras escaneadas: {scanned:N0}. Ventas/Gastos: {totalCabecerasResultado:N0}. Ámbito verificado: {scope.Count:N0}. Faltantes detectados: {missingInScope:N0}.");
 
         // Refresca siempre hoy y ayer, además de recuperar cabeceras históricas faltantes.
         // Antes de insertar las líneas elimina la instantánea anterior del CAB_ID para impedir
