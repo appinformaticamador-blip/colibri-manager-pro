@@ -1,0 +1,17 @@
+COLIBRÍ ENGINE / ERP 4.7.5 - REEMPLAZO COMPLETO DEL PROYECTO
+
+Este ZIP contiene la carpeta completa del repositorio para sustituir de una sola vez la carpeta local del proyecto y subirla a la rama develop de GitHub.
+
+IMPORTANTE:
+- Haz copia de tu carpeta actual antes de sustituirla.
+- Conserva cualquier config.json real que tengas fuera del repositorio.
+- Este ZIP contiene código fuente y workflows; no es el ejecutable Windows ya compilado.
+- Tras subirlo a develop, abre GitHub Actions > Build Colibri Engine Windows.
+- Descarga el artefacto COLIBRI_ENGINE_4_0_WINDOWS cuando la ejecución termine en verde.
+- Para actualizar el equipo donde corre Engine, conserva el config.json actual y sustituye el resto de la carpeta por el contenido del artefacto.
+
+Incluye:
+- Soporte para registros G de Numier.
+- Lectura de gastos G desde auditoría y tickets.
+- Corrección de compilación de Colibrí Engine.
+- Workflows completos de GitHub Actions.
