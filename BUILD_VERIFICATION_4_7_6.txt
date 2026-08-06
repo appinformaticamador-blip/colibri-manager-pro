@@ -1,0 +1,8 @@
+COLIBRÍ ERP 4.7.6 · VERIFICACIÓN
+
+- Sintaxis JSX/TypeScript: correcta (`tsc --noEmit`).
+- Imports locales inexistentes: 0.
+- Excel de prueba 05/08/2026:
+  - Bar Colibri: 22 operaciones, 248,60 EUR.
+  - APP AMADOR: 5 operaciones, 63,01 EUR excluidas.
+- La conciliación solo procesa la cuenta Bar Colibri.
