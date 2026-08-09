@@ -1,0 +1,21 @@
+COLIBRÍ ERP 5.0 · VERIFICACIÓN
+
+Fuente: COLIBRI_ERP_4_7_6_FILTRO_SUMUP_BAR_COLIBRI_COMPLETO.zip
+
+Cambios estructurales:
+- 8 áreas principales: Inicio, Operación, Finanzas, Personal, Gestoría, Análisis, Almacén, Configuración.
+- Los módulos anteriores se conservan como pestañas internas.
+- Rutas antiguas normalizadas para mantener accesos desde Dashboard y Centro de decisiones.
+- Menú móvil hamburguesa reducido a áreas principales.
+- Pestañas internas con alto contraste y sin navegación duplicada en TPV, Personal y Costes.
+
+Validaciones realizadas:
+- TypeScript 5.8.3 sobre src/App.jsx: OK, 0 errores de sintaxis.
+- Imports locales activos en src/: 0 rutas inexistentes.
+- package.json y package-lock.json: JSON válido.
+
+Instalación/build:
+- npm ci --no-audit --no-fund: NO COMPLETADO por 404 del registro interno para xlsx-0.18.5.tgz.
+- npm run build: NO COMPLETADO porque Vite no pudo instalarse tras el fallo anterior.
+
+No se afirma build Vite verificado en este entorno.
