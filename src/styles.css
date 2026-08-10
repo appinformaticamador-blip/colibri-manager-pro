@@ -1335,3 +1335,69 @@ body{padding:0!important;margin:0!important}
  .gestoria6 .row.controls,.inventory7 .row.controls{display:grid!important;grid-template-columns:1fr!important;width:100%!important}
  .gestoria6 .row.controls>* ,.inventory7 .row.controls>*{width:100%!important;max-width:none!important;margin:0!important}
 }
+
+/* COLIBRÍ ERP 5.0.2 · Ranking por fechas y tarjetas accionables en Almacén */
+.inventoryKpiButton{
+  width:100%;
+  min-height:118px;
+  text-align:left;
+  background:#fff !important;
+  color:#172033 !important;
+  border:1px solid #d9e7e9 !important;
+  box-shadow:0 10px 28px rgba(28,68,82,.07) !important;
+  cursor:pointer;
+}
+.inventoryKpiButton:hover{transform:translateY(-2px);box-shadow:0 14px 32px rgba(28,68,82,.12)!important}
+.inventoryKpiButton span{display:block;color:#5c697c!important}
+.inventoryKpiButton b{display:block;color:#078b75!important;font-size:1.8rem;margin:6px 0}
+.inventoryKpiButton b.bad{color:#b42318!important}.inventoryKpiButton b.ok{color:#087a45!important}
+.inventoryKpiButton small{display:block;color:#6a788a!important;font-weight:700}
+.inventoryRanking{overflow:hidden}
+.inventoryRankingHead{align-items:flex-start;gap:20px}
+.inventoryRankingHead h2{margin:.3rem 0;color:#28246f}
+.inventoryRankingHead p{max-width:760px;color:#566579;line-height:1.5}
+.inventoryRankingFilters{display:grid;grid-template-columns:repeat(2,minmax(145px,1fr));gap:9px;min-width:min(560px,48vw)}
+.inventoryRankingFilters label{display:grid;gap:5px;margin:0;color:#536273;font-weight:800;font-size:.8rem}
+.inventoryRankingFilters input{margin:0;background:#fff;color:#172033}
+.inventoryRankingFilters>input{grid-column:1/-1}
+.inventoryRankingFilters button{grid-column:1/-1}
+.rankingToolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:16px 0;flex-wrap:wrap}
+.rankingSort{display:flex;gap:8px;flex-wrap:wrap}
+.rankingSort button{background:#f4f7f9!important;color:#2f485b!important;border:1px solid #d7e2e7!important}
+.rankingSort button.active{background:linear-gradient(135deg,#35a9d0,#43b481)!important;color:#fff!important;border-color:transparent!important}
+.inventoryRankingList{display:grid;gap:10px}
+.inventoryRankingList article{display:grid;grid-template-columns:52px minmax(230px,1.5fr) repeat(3,minmax(100px,.55fr)) minmax(150px,.7fr);gap:12px;align-items:center;padding:14px;border-radius:18px;border:1px solid #d9e7e9;background:#fff;color:#172033;cursor:pointer}
+.inventoryRankingList article:hover{border-color:#8bcfc0;box-shadow:0 8px 22px rgba(21,103,97,.08)}
+.inventoryRankingList article.estimated{background:#fffaf0;border-color:#ecd597}
+.rankingPosition{display:grid;place-items:center;width:40px;height:40px;border-radius:14px;background:#edf8f5;color:#087866}
+.rankingPosition b{font-size:1.15rem}
+.rankingProduct{display:grid;gap:4px}.rankingProduct>b{color:#28246f}.rankingProduct small{color:#657487}
+.rankingStat{display:grid;gap:4px}.rankingStat span,.inventoryRankingList label>span{font-size:.7rem;letter-spacing:.06em;text-transform:uppercase;color:#637386;font-weight:900}.rankingStat b{color:#172033}.rankingStat small{color:#667486}
+.inventoryRankingList label{display:grid;gap:4px;margin:0;color:#536273;font-weight:800}
+.inventoryRankingList label input{margin:0;background:#fff;color:#172033;border:1px solid #cfdfe3}
+.inventoryRankingList label small{color:#7a6750}
+.inventoryDetailOverlay{z-index:100500!important;background:rgba(7,20,30,.64)!important;backdrop-filter:blur(5px)}
+.inventoryDetailModal{width:min(680px,calc(100vw - 24px));max-height:88vh;overflow:auto;background:#fff!important;color:#172033!important;border:1px solid #d6e5e8;box-sizing:border-box}
+.inventoryDetailModal h2{color:#28246f}.inventoryDetailModal p{color:#59687a;line-height:1.5}
+.inventoryDetailModal .ghost{background:#edf5f7!important;color:#29485c!important;border:1px solid #d4e2e7!important}
+.inventoryProductDetailGrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:18px 0}
+.inventoryProductDetailGrid article{padding:14px;border-radius:16px;background:#f5fafb;border:1px solid #dfebed}
+.inventoryProductDetailGrid span{display:block;color:#657487;font-size:.76rem;font-weight:800;text-transform:uppercase}.inventoryProductDetailGrid b{display:block;margin-top:6px;color:#172033;font-size:1.2rem}
+.rankModalCost{display:grid;gap:6px;margin:15px 0;color:#536273;font-weight:900}.rankModalCost input{margin:0;background:#fff;color:#172033}.rankModalCost small{color:#68778a;font-weight:600}
+@media(max-width:1050px){
+  .inventoryRankingHead{display:grid!important}.inventoryRankingFilters{min-width:0;width:100%}
+  .inventoryRankingList article{grid-template-columns:44px minmax(180px,1.3fr) repeat(2,minmax(95px,.6fr));}
+  .inventoryRankingList .rankingStat:nth-of-type(5),.inventoryRankingList label{grid-column:auto}
+}
+@media(max-width:700px){
+  .inventoryRankingFilters{grid-template-columns:1fr 1fr}.inventoryRankingFilters>input,.inventoryRankingFilters button{grid-column:1/-1}
+  .rankingToolbar{display:grid}.rankingSort{display:grid;grid-template-columns:1fr 1fr}.rankingSort button:last-child{grid-column:1/-1}.rankingToolbar>button{width:100%}
+  .inventoryRankingList article{grid-template-columns:42px 1fr;gap:9px;padding:13px}
+  .rankingProduct{min-width:0}.rankingStat,.inventoryRankingList label{grid-column:1/-1;padding-top:8px;border-top:1px solid #e5ecee}
+  .rankingStat{display:flex;justify-content:space-between;align-items:center}.rankingStat small{margin-left:auto;padding-left:8px}
+  .inventoryProductDetailGrid{grid-template-columns:1fr 1fr}.inventoryDetailModal{padding:18px!important;border-radius:22px!important}
+  .inventoryKpiButton{min-height:105px}
+}
+.inventoryQuickCostList article{cursor:pointer}.inventoryQuickCostList article:hover{border-color:#8bcfc0;box-shadow:0 8px 22px rgba(21,103,97,.08)}
+
+.inventoryQuickCostList article{cursor:pointer}.inventoryQuickCostList article:hover{border-color:#8bcfc0;box-shadow:0 8px 22px rgba(21,103,97,.08)}
