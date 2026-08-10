@@ -1114,10 +1114,11 @@ function inventoryParseJSON(key,fallback){
  }
 }
 
-function Inventory(){
- const[tab,setTab]=useState('resumen');
+function Inventory({initialTab='resumen',hideTabs=false}){
+ const[tab,setTab]=useState(initialTab);
  const[loading,setLoading]=useState(true),[error,setError]=useState('');
- const[data,setData]=useState({masters:[],items:[],recipes:[],ingredients:[],links:[],sales:[]});
+ const[data,setData]=useState({masters:[],items:[],recipes:[],ingredients:[],links:[],sales:[],monthSales:[]});
+ const[costMap,setCostMap]=useState(new Map()),[costQuery,setCostQuery]=useState(''),[costDrafts,setCostDrafts]=useState({}),[savingCosts,setSavingCosts]=useState(false);
  const[state,setState]=useState(()=>inventoryParseJSON('colibri_inventory_v7',{stocks:{},counts:[],waste:[],minimums:{},adjustments:[]}));
  const[query,setQuery]=useState(''),[countItem,setCountItem]=useState(''),[countQty,setCountQty]=useState('');
  const[wasteItem,setWasteItem]=useState(''),[wasteQty,setWasteQty]=useState(''),[wasteReason,setWasteReason]=useState('');
@@ -1128,17 +1129,20 @@ function Inventory(){
   if(!supabase){setError('Supabase no configurado');setLoading(false);return}
   setLoading(true);setError('');
   try{
-   const from=addDays(today(),-30);
-   const [m,i,r,ri,l,sales]=await Promise.all([
+   const from=addDays(today(),-30),monthFrom=today().slice(0,7)+'-01';
+   const [m,i,r,ri,l,sales,monthSales,nextCostMap]=await Promise.all([
     supabase.from('purchase_master_items').select('*').eq('active',true).order('name').limit(20000),
     supabase.from('purchase_invoice_items').select('*,purchase_invoices(invoice_date,status,purchase_suppliers(name))').eq('review_status','confirmed').limit(20000),
     supabase.from('profitability_recipes').select('*').limit(20000),
     supabase.from('profitability_recipe_ingredients').select('*').limit(30000),
     supabase.from('purchase_product_numier_links').select('*').limit(20000),
-    loadSalesRange(from,addDays(today(),1))
+    loadSalesRange(from,addDays(today(),1)),
+    loadSalesRangeGestoria(monthFrom,addDays(today(),1)),
+    loadProfitabilityCostMap()
    ]);
    const e=m.error||i.error||r.error||ri.error||l.error;if(e)throw e;
-   setData({masters:m.data||[],items:i.data||[],recipes:r.data||[],ingredients:ri.data||[],links:l.data||[],sales:sales.lines||[]});
+   setData({masters:m.data||[],items:i.data||[],recipes:r.data||[],ingredients:ri.data||[],links:l.data||[],sales:sales.lines||[],monthSales:monthSales.lines||[]});
+   setCostMap(nextCostMap);
   }catch(e){setError(e.message||String(e))}finally{setLoading(false)}
  }
  const movements=useMemo(()=>{
@@ -1151,18 +1155,25 @@ function Inventory(){
   return{purchased,consumed};
  },[data]);
  const rows=useMemo(()=>data.masters.map(m=>{const id=String(m.id),opening=Number(state.stocks?.[id]||0),purchases=movements.purchased.get(id)||0,used=movements.consumed.get(id)||0,waste=(state.waste||[]).filter(x=>String(x.itemId)===id).reduce((a,x)=>a+Number(x.qty||0),0),adjust=(state.adjustments||[]).filter(x=>String(x.itemId)===id).reduce((a,x)=>a+Number(x.qty||0),0),theoretical=opening+purchases-used-waste+adjust,lastCount=[...(state.counts||[])].filter(x=>String(x.itemId)===id).sort((a,b)=>String(b.date).localeCompare(String(a.date)))[0],real=lastCount?Number(lastCount.qty||0):null,min=Number(state.minimums?.[id]||0),daily=used/30,coverage=daily>0?theoretical/daily:999,recommended=Math.max(0,(daily*Number(days||7)+min)-theoretical);return{...m,opening,purchases,used,waste,adjust,theoretical,real,diff:real===null?null:real-theoretical,min,daily,coverage,recommended}}).filter(r=>!query||normalizeProductName(r.name).includes(normalizeProductName(query))),[data,state,movements,query,days]);
+ const monthCostRows=useMemo(()=>{
+  const grouped=new Map();
+  (data.monthSales||[]).forEach(line=>{const code=String(line.articulo||'').trim();if(!code)return;const qty=Math.abs(Number(line.cantidad||0)),revenue=Number(line.importe||0);const current=grouped.get(code)||{code,name:String(line.descripcion||line.nombre||code).trim()||code,qty:0,revenue:0};current.qty+=qty;current.revenue+=revenue;grouped.set(code,current)});
+  return [...grouped.values()].map(x=>{const info=costMap.get(x.code);const avgSale=x.qty?x.revenue/x.qty:0;const configured=info&&!info.excluded&&info.cost!==null&&Number.isFinite(Number(info.cost));const unitCost=configured?Number(info.cost):Math.max(0,avgSale/3);return {...x,avgSale,unitCost,configured,estimated:!configured,source:configured?(info?.source||'configurado'):'automatic_third'}}).filter(x=>!costQuery||normalizeProductName(`${x.name} ${x.code}`).includes(normalizeProductName(costQuery))).sort((a,b)=>b.revenue-a.revenue);
+ },[data.monthSales,costMap,costQuery]);
+ async function saveMonthCosts(){const changes=monthCostRows.filter(x=>costDrafts[x.code]!==undefined&&costDrafts[x.code]!==''&&Number.isFinite(Number(String(costDrafts[x.code]).replace(',','.'))));if(!changes.length)return alert('No hay costes modificados para guardar');setSavingCosts(true);try{for(const x of changes){await persistArticleCost(x.code,Number(String(costDrafts[x.code]).replace(',','.')),'Coste rápido desde Almacén');}const next=await loadProfitabilityCostMap();setCostMap(next);setCostDrafts({});alert(`Guardados ${changes.length} costes y recalculados.`)}finally{setSavingCosts(false)}}
  const alerts=rows.filter(r=>r.theoretical<r.min||r.coverage<2||(r.diff!==null&&Math.abs(r.diff)>Math.max(1,r.theoretical*.1)));const stockValue=rows.reduce((a,r)=>a+Math.max(0,r.theoretical)*Number(r.manual_unit_cost||0),0);const purchaseValue=rows.reduce((a,r)=>a+r.recommended*Number(r.manual_unit_cost||0),0);
  function setOpening(id,value){setState(v=>({...v,stocks:{...v.stocks,[id]:Number(value||0)}}))}
  function setMinimum(id,value){setState(v=>({...v,minimums:{...v.minimums,[id]:Number(value||0)}}))}
  function addCount(){if(!countItem||countQty==='')return alert('Selecciona artículo e indica cantidad');setState(v=>({...v,counts:[...v.counts,{id:Date.now(),itemId:countItem,qty:Number(countQty),date:new Date().toISOString()}]}));setCountQty('');alert('Inventario guardado')}
  function addWaste(){if(!wasteItem||!Number(wasteQty))return alert('Selecciona artículo e indica cantidad');setState(v=>({...v,waste:[...v.waste,{id:Date.now(),itemId:wasteItem,qty:Number(wasteQty),reason:wasteReason||'Merma',date:new Date().toISOString()}]}));setWasteQty('');setWasteReason('');alert('Merma registrada')}
  function exportOrder(){const lines=['ARTICULO;UNIDAD;STOCK TEORICO;COBERTURA DIAS;COMPRAR'];rows.filter(r=>r.recommended>0).forEach(r=>lines.push(`${r.name};${r.base_unit||'ud'};${r.theoretical.toFixed(2)};${r.coverage===999?'':r.coverage.toFixed(1)};${r.recommended.toFixed(2)}`));downloadFile(`PEDIDO_COLIBRI_${today()}.csv`,new Blob([lines.join('\n')],{type:'text/csv;charset=utf-8'}),'text/csv')}
- if(loading)return <div className="card"><h2>Cargando Almacén 7.0…</h2></div>;
- const tabs=[['resumen','Resumen'],['stock','Stock'],['inventario','Inventario'],['mermas','Mermas'],['pedido','Pedido recomendado']];
- return <div className="inventory7"><div className="card hero inventoryHero"><div><span className="sectionEyebrow">ALMACÉN 7.0 · STOCK Y COMPRAS</span><h2>Stock teórico, inventario y previsión</h2><p>Entradas desde facturas, consumo desde ventas y escandallos, mermas y pedido recomendado.</p></div><div className="row controls"><input placeholder="Buscar artículo" value={query} onChange={e=>setQuery(e.target.value)}/><button onClick={load}>Actualizar</button></div></div>{error&&<div className="warnBox">{error}</div>}
+ if(loading)return <div className="card"><h2>Cargando Almacén 8.0…</h2></div>;
+ const tabs=[['resumen','Resumen'],['costes','Costes rápidos'],['stock','Stock'],['inventario','Inventario'],['mermas','Mermas'],['pedido','Pedido recomendado']];
+ return <div className="inventory7"><div className="card hero inventoryHero"><div><span className="sectionEyebrow">ALMACÉN 8.0 · STOCK, COMPRAS Y COSTES</span><h2>Stock teórico, inventario y previsión</h2><p>Entradas desde facturas, consumo desde ventas y escandallos, mermas y pedido recomendado.</p></div><div className="row controls"><input placeholder="Buscar artículo" value={query} onChange={e=>setQuery(e.target.value)}/><button onClick={load}>Actualizar</button></div></div>{error&&<div className="warnBox">{error}</div>}
  <div className="grid inventoryKpis"><div className="card kpi"><span>Artículos</span><b>{rows.length}</b></div><div className="card kpi"><span>Valor stock estimado</span><b>{money(stockValue)}</b></div><div className="card kpi"><span>Alertas</span><b className={alerts.length?'bad':'ok'}>{alerts.length}</b></div><div className="card kpi"><span>Pedido recomendado</span><b>{money(purchaseValue)}</b></div></div>
  {!hideTabs&&<nav className="tpvTabs">{tabs.map(([v,l])=><button key={v} className={tab===v?'active':''} onClick={()=>setTab(v)}>{l}</button>)}</nav>}
  {tab==='resumen'&&<div className="grid"><div className="card"><h2>Alertas de almacén</h2>{alerts.length?alerts.slice(0,12).map(r=><div className="inventoryAlert" key={r.id}><div><b>{r.name}</b><small>{r.theoretical<r.min?'Por debajo del mínimo':r.coverage<2?'Menos de 2 días de cobertura':'Descuadre de inventario'}</small></div><strong>{r.coverage===999?'—':`${r.coverage.toFixed(1)} días`}</strong></div>):<div className="alertOk">No hay alertas críticas de stock.</div>}</div><div className="card"><h2>Calidad del control</h2><p>Artículos con escandallo o vínculo: <b>{rows.filter(r=>r.used>0).length}</b></p><p>Artículos con stock mínimo: <b>{rows.filter(r=>r.min>0).length}</b></p><p>Artículos contados: <b>{rows.filter(r=>r.real!==null).length}</b></p><p>Consumo calculado últimos 30 días: <b>{rows.reduce((a,r)=>a+r.used,0).toFixed(1)} unidades base</b></p></div></div>}
+ {tab==='costes'&&<section className="card inventoryQuickCosts"><div className="row between inventoryQuickCostHead"><div><span className="sectionEyebrow">PRODUCTOS VENDIDOS ESTE MES</span><h2>Costes rápidos</h2><p>Solo aparecen artículos vendidos durante el mes actual. Si no existe un coste configurado desde compras, escandallo o coste manual, se propone automáticamente 1/3 del PVP medio.</p></div><div className="inventoryQuickCostActions"><input placeholder="Buscar producto o código" value={costQuery} onChange={e=>setCostQuery(e.target.value)}/><button disabled={savingCosts} onClick={saveMonthCosts}>{savingCosts?'Guardando…':'Guardar cambios'}</button></div></div><div className="quickCostSummary"><span><b>{monthCostRows.length}</b> productos vendidos</span><span><b>{monthCostRows.filter(x=>x.estimated).length}</b> con coste provisional 1/3</span><span><b>{monthCostRows.filter(x=>x.configured).length}</b> con coste configurado</span></div><div className="inventoryQuickCostList">{monthCostRows.map(x=><article key={x.code} className={x.estimated?'estimated':''}><div className="quickCostProduct"><b>{x.name}</b><small>Código {x.code} · {x.qty.toFixed(2)} uds · ventas {money(x.revenue)}</small></div><div className="quickCostMeta"><span>PVP medio</span><b>{money(x.avgSale)}</b></div><div className="quickCostMeta"><span>Origen</span><b>{x.estimated?'Estimado 1/3':x.source==='local_manual'||x.source==='manual'?'Manual':'Compras / escandallo'}</b></div><label><span>Coste €/ud</span><input inputMode="decimal" type="number" min="0" step="0.0001" value={costDrafts[x.code]??x.unitCost.toFixed(4)} onChange={e=>setCostDrafts(v=>({...v,[x.code]:e.target.value}))}/></label></article>)}{!monthCostRows.length&&<div className="alertOk">No hay productos vendidos este mes con este filtro.</div>}</div></section>}
  {tab==='stock'&&<div className="card"><div className="row between"><div><h2>Stock teórico</h2><p>Stock inicial + compras − consumo − mermas + ajustes.</p></div></div><div className="tableScroll"><table><thead><tr><th>Artículo</th><th>Unidad</th><th>Inicial</th><th>Entradas</th><th>Consumo 30d</th><th>Merma</th><th>Teórico</th><th>Real</th><th>Diferencia</th><th>Mínimo</th></tr></thead><tbody>{rows.map(r=><tr key={r.id}><td><b>{r.name}</b><small>{r.category||''}</small></td><td>{r.base_unit||'ud'}</td><td><input className="inventoryNumber" type="number" step="0.01" value={r.opening} onChange={e=>setOpening(String(r.id),e.target.value)}/></td><td>{r.purchases.toFixed(2)}</td><td>{r.used.toFixed(2)}</td><td>{r.waste.toFixed(2)}</td><td><b>{r.theoretical.toFixed(2)}</b></td><td>{r.real===null?'—':r.real.toFixed(2)}</td><td className={r.diff===null?'':Math.abs(r.diff)>.01?'bad':'ok'}>{r.diff===null?'—':r.diff.toFixed(2)}</td><td><input className="inventoryNumber" type="number" step="0.01" value={r.min} onChange={e=>setMinimum(String(r.id),e.target.value)}/></td></tr>)}</tbody></table></div></div>}
  {tab==='inventario'&&<div className="grid"><div className="card"><h2>Nuevo recuento</h2><label>Artículo<select value={countItem} onChange={e=>setCountItem(e.target.value)}><option value="">Seleccionar…</option>{data.masters.map(m=><option value={m.id} key={m.id}>{m.name} ({m.base_unit||'ud'})</option>)}</select></label><label>Cantidad real<input type="number" step="0.01" value={countQty} onChange={e=>setCountQty(e.target.value)}/></label><button onClick={addCount}>Guardar inventario</button></div><div className="card"><h2>Últimos recuentos</h2>{[...(state.counts||[])].sort((a,b)=>String(b.date).localeCompare(String(a.date))).slice(0,20).map(x=>{const m=data.masters.find(i=>String(i.id)===String(x.itemId));return <div className="inventoryHistory" key={x.id}><div><b>{m?.name||'Artículo'}</b><small>{new Date(x.date).toLocaleString('es-ES')}</small></div><strong>{Number(x.qty).toFixed(2)} {m?.base_unit||'ud'}</strong></div>})}</div></div>}
  {tab==='mermas'&&<div className="grid"><div className="card"><h2>Registrar merma</h2><label>Artículo<select value={wasteItem} onChange={e=>setWasteItem(e.target.value)}><option value="">Seleccionar…</option>{data.masters.map(m=><option value={m.id} key={m.id}>{m.name}</option>)}</select></label><label>Cantidad<input type="number" step="0.01" value={wasteQty} onChange={e=>setWasteQty(e.target.value)}/></label><label>Motivo<input value={wasteReason} onChange={e=>setWasteReason(e.target.value)} placeholder="Rotura, caducidad, invitación…"/></label><button onClick={addWaste}>Registrar merma</button></div><div className="card"><h2>Historial de mermas</h2>{[...(state.waste||[])].sort((a,b)=>String(b.date).localeCompare(String(a.date))).slice(0,30).map(x=>{const m=data.masters.find(i=>String(i.id)===String(x.itemId));return <div className="inventoryHistory" key={x.id}><div><b>{m?.name||'Artículo'}</b><small>{x.reason} · {new Date(x.date).toLocaleDateString('es-ES')}</small></div><strong>-{Number(x.qty).toFixed(2)} {m?.base_unit||'ud'}</strong></div>})}</div></div>}
@@ -1863,11 +1874,11 @@ async function loadGestoriaExtras(from,to){
  ]);
  return {closures,fixed,variable,invoices,payments};
 }
-function Gestoria(){
+function Gestoria({initialTab='revision',hideTabs=false}){
  const yNow=new Date().getFullYear();
  const[year,setYear]=useState(yNow);const[type,setType]=useState('mes');const[period,setPeriod]=useState(new Date().getMonth()+1);
  const[data,setData]=useState({tickets:[],lines:[],sync:null,articles:new Map()});const[extras,setExtras]=useState({closures:[],fixed:[],variable:[],invoices:[],payments:[]});const[realResult,setRealResult]=useState(null);const[gestoriaCostMap,setGestoriaCostMap]=useState(new Map());
- const[loading,setLoading]=useState(false);const[progress,setProgress]=useState('');const[tab,setTab]=useState('revision');
+ const[loading,setLoading]=useState(false);const[progress,setProgress]=useState('');const[tab,setTab]=useState(initialTab);
  const range=type==='trimestre'?quarterRange(Number(year),Number(period)):monthRange(Number(year),Number(period));
  const lockKey=`colibri_gestoria_lock_${range.from}_${range.to}`;const[locked,setLocked]=useState(()=>localStorage.getItem(lockKey)==='1');
  useEffect(()=>{setLocked(localStorage.getItem(lockKey)==='1');load()},[year,type,period]);

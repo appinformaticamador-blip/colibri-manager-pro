@@ -1,0 +1,9 @@
+COLIBRÍ ERP 5.0.1 · VERIFICACIÓN
+
+- Sintaxis de src/App.jsx validada con TypeScript transpileModule: 0 errores.
+- Imports locales en src/: 0 rutas inexistentes.
+- Corregidas referencias hideTabs en Almacén y Gestoría mediante props con valor por defecto.
+- npm ci --no-audit --no-fund: intentado; el entorno no completó la instalación dentro del tiempo disponible.
+- npm run build: no ejecutable al no haberse instalado Vite (vite: not found).
+
+No se afirma que el build Vite haya finalizado correctamente en este entorno.

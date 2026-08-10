@@ -1282,3 +1282,56 @@ body{padding:0!important;margin:0!important}
  .areaHeader{display:none}
  .areaTabs{top:73px}
 }
+
+/* COLIBRÍ ERP 5.0.1 · Almacén costes rápidos + adaptación móvil unificada */
+.inventoryQuickCosts{overflow:hidden}
+.inventoryQuickCostHead{align-items:flex-start;gap:18px}
+.inventoryQuickCostHead h2{margin:.3rem 0;color:#28246f}
+.inventoryQuickCostHead p{margin:.25rem 0 0;color:#58697b;max-width:780px;line-height:1.5}
+.inventoryQuickCostActions{display:grid;grid-template-columns:minmax(220px,340px) auto;gap:10px;align-items:center}
+.inventoryQuickCostActions input{margin:0;background:#fff;color:#172033}
+.quickCostSummary{display:flex;flex-wrap:wrap;gap:10px;margin:18px 0}
+.quickCostSummary span{padding:10px 13px;border-radius:13px;background:#f1f7f8;color:#526273;border:1px solid #d9e7e9}
+.quickCostSummary b{color:#08786f}
+.inventoryQuickCostList{display:grid;gap:10px}
+.inventoryQuickCostList article{display:grid;grid-template-columns:minmax(220px,1.6fr) minmax(110px,.55fr) minmax(150px,.75fr) minmax(135px,.65fr);gap:12px;align-items:center;padding:14px;border:1px solid #d9e7e9;border-radius:17px;background:#fff;color:#172033}
+.inventoryQuickCostList article.estimated{background:#fffaf0;border-color:#ecd597}
+.quickCostProduct{display:grid;gap:4px;min-width:0}
+.quickCostProduct b{color:#28246f;overflow-wrap:anywhere}
+.quickCostProduct small{color:#657487;line-height:1.4}
+.quickCostMeta{display:grid;gap:4px}
+.quickCostMeta span,.inventoryQuickCostList label>span{font-size:.72rem;font-weight:900;letter-spacing:.05em;text-transform:uppercase;color:#637386}
+.quickCostMeta b{color:#172033;overflow-wrap:anywhere}
+.inventoryQuickCostList label{display:grid;gap:5px;margin:0;font-weight:800;color:#536273}
+.inventoryQuickCostList label input{margin:0;background:#fff;color:#172033;border:1px solid #cfdfe3}
+
+@media(max-width:900px){
+ .erp50 .hero,.erp50 .serviceHeader,.erp50 .tpvHero,.erp50 .inventoryHero,.erp50 .gestoriaHero,.erp50 .settingsHero{flex-direction:column!important;align-items:stretch!important}
+ .erp50 .hero>.controls,.erp50 .tpvHero>.controls,.erp50 .inventoryHero>.controls,.erp50 .gestoriaHero>.controls{width:100%!important;display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:8px!important}
+ .erp50 .hero>.controls input,.erp50 .hero>.controls select,.erp50 .tpvHero>.controls input,.erp50 .gestoriaHero>.controls input,.erp50 .gestoriaHero>.controls select{width:100%!important;max-width:none!important;margin:0!important}
+ .erp50 .hero>.controls button,.erp50 .tpvHero>.controls button,.erp50 .gestoriaHero>.controls button{width:100%!important}
+ .inventoryQuickCostHead{display:grid!important}
+ .inventoryQuickCostActions{grid-template-columns:1fr auto;width:100%}
+ .inventoryQuickCostList article{grid-template-columns:1fr 1fr}
+ .quickCostProduct{grid-column:1/-1}
+ .erp50 .tableScroll{max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}
+ .erp50 table{max-width:100%}
+}
+@media(max-width:600px){
+ .erp50 .page{padding:10px!important;overflow-x:hidden}
+ .erp50 .card{max-width:100%;box-sizing:border-box}
+ .erp50 .grid,.erp50 .kpis,.erp50 .tpvKpis,.erp50 .inventoryKpis,.erp50 .reportGrid,.erp50 .gestoriaRealBreakdown{grid-template-columns:1fr!important}
+ .erp50 .hero>.controls,.erp50 .tpvHero>.controls,.erp50 .inventoryHero>.controls,.erp50 .gestoriaHero>.controls{grid-template-columns:1fr!important}
+ .erp50 .row.between{flex-wrap:wrap;align-items:flex-start}
+ .erp50 .row.between>button,.erp50 .row.between>.row{max-width:100%}
+ .erp50 .tpvTabs,.erp50 .profitTabs,.erp50 .settingsTabs,.erp50 .staffTabs{display:flex!important;overflow-x:auto!important;flex-wrap:nowrap!important;max-width:100%!important;white-space:nowrap!important;-webkit-overflow-scrolling:touch}
+ .erp50 .tpvTabs button,.erp50 .profitTabs button,.erp50 .settingsTabs button,.erp50 .staffTabs button{min-width:max-content!important;width:auto!important;flex:0 0 auto!important}
+ .inventoryQuickCostActions{grid-template-columns:1fr}
+ .inventoryQuickCostActions button{width:100%}
+ .inventoryQuickCostList article{grid-template-columns:1fr}
+ .quickCostProduct{grid-column:auto}
+ .quickCostSummary{display:grid;grid-template-columns:1fr;width:100%}
+ .inventory7 table,.gestoria6 table,.tpvControl table{min-width:680px}
+ .gestoria6 .row.controls,.inventory7 .row.controls{display:grid!important;grid-template-columns:1fr!important;width:100%!important}
+ .gestoria6 .row.controls>* ,.inventory7 .row.controls>*{width:100%!important;max-width:none!important;margin:0!important}
+}
