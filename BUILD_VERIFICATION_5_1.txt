@@ -1,0 +1,18 @@
+COLIBRÍ ERP 5.1 · VERIFICACIÓN
+Fecha: 2026-08-11
+
+VALIDACIONES COMPLETADAS
+- package.json / package-lock.json válidos.
+- Sintaxis de src/App.jsx validada con TypeScript 5.8.3 y typeRoots vacío: 0 errores de sintaxis.
+- Imports locales revisados: 0 rutas inexistentes.
+- Regla global de personal revisada: loadRealProfitability usa siempre work_schedule_weeks para horas y coste económico; fichajes quedan en clockHours/details.actualLabor como referencia.
+- ShiftProfitability calcula coste por franja con hourly_cost individual del cuadrante, no tarifa fija global.
+
+COMANDOS SOLICITADOS
+1) npm ci --no-audit --no-fund
+   Intentado. El proceso quedó bloqueado en el entorno de ejecución y fue detenido tras timeout; Vite no quedó instalado.
+2) npm run build
+   Ejecutado después del intento de instalación.
+   Resultado: EXIT 127, "vite: not found" porque npm ci no completó la instalación.
+
+Por tanto, NO se afirma que el build Vite haya finalizado correctamente en este entorno.

@@ -112,22 +112,23 @@ export async function loadRealProfitability(supabase,from,to,clocks=[]){
  result.details.plannedLabor=[...laborMap.values()];
  result.plannedHours=result.details.plannedLabor.reduce((s,r)=>s+r.hours,0);
  result.plannedLaborCost=result.details.plannedLabor.reduce((s,r)=>s+r.cost,0);
+ // REGLA GLOBAL COLIBRÍ: el coste económico de personal SIEMPRE sale del cuadrante.
+ // Los fichajes son referencia operativa (cumplimiento/puntualidad), nunca modifican rentabilidad.
  const activeEmployees=employees.filter(e=>e.active!==false);
  const actualLabor=laborFromClockRecords(clocks,activeEmployees,start,end,new Date());
- result.details.labor=actualLabor.details;
- result.hours=actualLabor.hours;
  result.clockHours=actualLabor.hours;
- result.laborAccrued=actualLabor.cost;
+ result.details.actualLabor=actualLabor.details;
+ result.details.labor=result.details.plannedLabor;
+ result.hours=result.plannedHours;
+ result.laborAccrued=result.plannedLaborCost;
  result.payroll=result.laborAccrued;
- // Si todavía no existen fichajes en el periodo, se conserva el coste previsto como respaldo explícito.
- result.laborSource=result.hours>0?'clock_records':'work_schedule_weeks';
- if(result.hours===0&&result.plannedHours>0){result.hours=result.plannedHours;result.laborAccrued=result.plannedLaborCost;result.payroll=result.laborAccrued;result.details.labor=result.details.plannedLabor}
+ result.laborSource='work_schedule_weeks';
 
  // Compatibilidad: solo usa registros antiguos en categorías que aún no tienen datos nuevos.
  for(const row of legacyRows){
   const value=num(row.amount||row.cost),type=String(row.type||row.category||'').toLowerCase();
   if((type.includes('purchase')||type.includes('compra')))result.purchases+=value;
-  else if((type.includes('payroll')||type.includes('personal'))&&result.laborAccrued===0){result.payroll+=value;result.laborAccrued+=value}
+  else if(type.includes('payroll')||type.includes('personal')){/* Ignorado: el coste de personal solo puede proceder del cuadrante. */}
   else if((type.includes('variable')||type.includes('imprev'))&&result.variable===0)result.variable+=value;
   else if(result.fixed===0)result.fixed+=value;
  }
