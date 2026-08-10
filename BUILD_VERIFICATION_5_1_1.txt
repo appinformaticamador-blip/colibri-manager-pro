@@ -1,0 +1,19 @@
+COLIBRÍ ERP 5.1.1 · VERIFICACIÓN
+
+Cambios:
+- Corregido desfase UTC/local en la fecha de negocio.
+- Análisis > Mes comienza siempre el día 1 del mes.
+- El mes actual termina en el día actual (no imputa días futuros).
+- Añadido modo Rango con Desde/Hasta inclusivos.
+- Rangos amplios usan el loader paginado de Gestoría.
+- El periodo anterior conserva el mismo número de días.
+
+Validaciones:
+- Sintaxis JSX/JS validada con TypeScript y typeRoots vacío: OK (status 0).
+- Imports locales de src/: 0 rutas inexistentes.
+- Pruebas de calendario: 2026-08-11 -> inicio 2026-08-01; diciembre -> enero siguiente: OK.
+
+Build:
+- npm ci --no-audit --no-fund: iniciado, quedó bloqueado en el entorno de paquetes y se detuvo por timeout.
+- npm run build: ejecutado posteriormente; falla con `vite: not found` porque npm ci no completó la instalación.
+- Por tanto, no se afirma build Vite verificado en este entorno.
