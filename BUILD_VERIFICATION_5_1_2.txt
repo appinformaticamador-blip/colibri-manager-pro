@@ -1,0 +1,21 @@
+COLIBRÍ ERP 5.1.2 · VERIFICACIÓN
+
+Cambios de esta versión:
+- Revisión responsive global de todas las áreas del ERP.
+- Pestañas de área no sticky en móvil para evitar solapamientos.
+- Pestañas internas en rejilla de 2 columnas en teléfono y 1 columna en pantallas <=390px.
+- Contenedores, cards, filtros, formularios y modales limitados al viewport.
+- Tablas con scroll horizontal interno, sin ampliar la página.
+- Dashboard, Análisis, Operación, Finanzas, Personal, Gestoría, Almacén y Configuración cubiertos por la capa responsive global.
+
+Comprobaciones:
+- Llaves CSS equilibradas: OK.
+- Imports locales inexistentes: 0.
+- package.json: 5.1.2.
+- package-lock.json: 5.1.2.
+- src/App.jsx no se modifica en esta revisión responsive; se conserva el código funcional de 5.1.1.
+
+Build en este entorno:
+- npm ci --no-audit --no-fund: no pudo completarse por el entorno del contenedor.
+- Por ello no se afirma que npm run build/Vite haya finalizado aquí.
+- El intento de comprobación TypeScript tampoco pudo resolver definiciones instalables (@types/react, node, babel, etc.) al no estar disponibles las dependencias.

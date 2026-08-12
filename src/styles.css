@@ -1419,3 +1419,177 @@ body{padding:0!important;margin:0!important}
 .analysisCustomRange button,.analysisSingleDate button{width:auto;white-space:nowrap}
 @media(max-width:900px){.analysisPeriodControls{width:100%;min-width:0}.analysisSingleDate{grid-template-columns:1fr auto}.analysisCustomRange{grid-template-columns:1fr 1fr}.analysisCustomRange button{grid-column:1/-1;width:100%}}
 @media(max-width:600px){.analysisCustomRange,.analysisSingleDate{grid-template-columns:1fr}.analysisCustomRange button,.analysisSingleDate button{grid-column:auto;width:100%}.analysisPeriodControls .intelligenceRange{grid-template-columns:repeat(2,minmax(0,1fr))!important}.analysisPeriodControls .intelligenceRange button:last-child{grid-column:auto!important}}
+
+/* =========================================================
+   COLIBRÍ ERP 5.1.2 · RESPONSIVE GLOBAL MÓVIL
+   Revisión completa: Dashboard, Operación, Finanzas, Personal,
+   Gestoría, Análisis, Almacén y Configuración.
+   ========================================================= */
+@media (max-width: 900px){
+  html,body,#root{max-width:100%;overflow-x:hidden}
+  .erp50,.erpShell,.erpMain,.page,.erpArea,
+  .dashboard5,.tpvControl,.unifiedProfit,.staffCenter,.gestoria6,
+  .analysisArea51,.analysis51,.businessIntelligencePro,
+  .inventory7,.settings82,.servicePage,.commandCenter{
+    width:100%;max-width:100%;min-width:0;box-sizing:border-box;
+  }
+  .erp50 *{min-width:0;box-sizing:border-box}
+  .erp50 img,.erp50 svg,.erp50 canvas{max-width:100%;height:auto}
+  .erp50 h1,.erp50 h2,.erp50 h3,.erp50 h4,.erp50 p,
+  .erp50 span,.erp50 small,.erp50 b,.erp50 strong,.erp50 em{
+    overflow-wrap:anywhere;
+  }
+  .erp50 .row{max-width:100%;min-width:0}
+  .erp50 .card,.erp50 .panel,.erp50 .modalbox{max-width:100%;min-width:0}
+
+  /* Las pestañas de área dejan de flotar sobre el contenido en móvil. */
+  .erp50 .areaTabs{
+    position:relative!important;
+    top:auto!important;
+    z-index:2!important;
+    max-width:100%!important;
+  }
+  .erp50 .profitability5 .profitSubTabs,
+  .erp50 .staffTabs,
+  .erp50 .settingsTabs,
+  .erp50 .tpvTabs{
+    position:relative!important;
+    top:auto!important;
+  }
+
+  /* Héroes, cabeceras y filtros nunca conservan anchura de escritorio. */
+  .erp50 .hero,.erp50 .dash5Hero,.erp50 .tpvHero,.erp50 .gestoriaHero,
+  .erp50 .inventoryHero,.erp50 .settingsHero,.erp50 .serviceHeader,
+  .erp50 .intelligenceHero,.erp50 .inventoryRankingHead,
+  .erp50 .inventoryQuickCostHead,.erp50 .staffHero{
+    width:100%!important;max-width:100%!important;min-width:0!important;
+  }
+  .analysisPeriodControls,.intelligenceRange,.analysisSingleDate,
+  .analysisCustomRange,.inventoryRankingFilters,.inventoryQuickCostActions{
+    width:100%!important;max-width:100%!important;min-width:0!important;
+  }
+
+  /* Rejillas amplias pasan progresivamente a dos columnas. */
+  .dash5Kpis,.analysisMainKpis,.analysisComparisonCards,.inventoryKpis,
+  .unifiedProfitKpis,.staffKpis,.clockKpis,.serviceKpis{
+    grid-template-columns:repeat(2,minmax(0,1fr))!important;
+  }
+  .dash5Grid,.dash5Grid.three,.decisionColumns,.breakEvenGrid,.simulatorGrid,
+  .profit5Compare,.gestoriaRealBreakdown{
+    grid-template-columns:1fr!important;
+  }
+
+  /* Las tablas se desplazan DENTRO de su bloque; nunca ensanchan la página. */
+  .erp50 table{
+    display:block;
+    width:100%!important;
+    max-width:100%!important;
+    overflow-x:auto!important;
+    -webkit-overflow-scrolling:touch;
+  }
+  .erp50 thead,.erp50 tbody,.erp50 tfoot{width:max-content;min-width:100%}
+  .erp50 .tableScroll,.erp50 .unifiedTraceTable,.erp50 .scheduleWrap{
+    width:100%;max-width:100%;overflow-x:auto!important;-webkit-overflow-scrolling:touch;
+  }
+
+  /* Modales seguros para Safari/iPhone. */
+  .erp50 .modal,.erp50 .staffModal,.erp50 .analysisModalOverlay,
+  .erp50 .inventoryDetailOverlay,.erp50 .unifiedProfitModalOverlay{
+    max-width:100vw!important;overflow-x:hidden!important;
+  }
+}
+
+@media (max-width: 600px){
+  .erp50 .page{padding:10px!important}
+
+  /* Navegación interna realmente vertical/adaptada: 2 botones por fila. */
+  .erp50 .areaTabs{
+    display:grid!important;
+    grid-template-columns:repeat(2,minmax(0,1fr))!important;
+    gap:7px!important;
+    overflow:visible!important;
+    margin:0!important;
+    padding:7px!important;
+  }
+  .erp50 .areaTabs button{
+    width:100%!important;
+    min-width:0!important;
+    max-width:100%!important;
+    white-space:normal!important;
+    line-height:1.15!important;
+    padding:10px 8px!important;
+  }
+  .erp50 .areaTabs button b{white-space:normal!important;text-align:center}
+
+  /* Dashboard: nada pisa el saludo ni los datos. */
+  .dashboard5{gap:12px!important}
+  .dash5Hero{display:grid!important;align-items:stretch!important;padding:18px!important}
+  .dash5Hero h1{font-size:clamp(2rem,10vw,2.75rem)!important;line-height:1.02!important}
+  .dash5Hero p{font-size:.98rem!important}
+  .dash5Date{width:100%!important;grid-template-columns:1fr!important}
+  .dash5Kpis{grid-template-columns:repeat(2,minmax(0,1fr))!important}
+  .dash5Kpi{padding:14px!important;min-height:128px!important}
+  .dash5Kpi b{font-size:clamp(1.45rem,7vw,1.9rem)!important}
+  .dash5Goal>div:first-child{display:grid!important;gap:4px!important}
+  .dashboardQuickActions{max-width:calc(100vw - 20px)!important;overflow-x:auto!important}
+
+  /* Análisis: filtros y contenido nunca salen por el lateral. */
+  .analysisArea51,.analysis51,.businessIntelligencePro{overflow:visible!important}
+  .analysisPeriodControls{display:grid!important;grid-template-columns:1fr!important}
+  .analysisPeriodControls .intelligenceRange{
+    display:grid!important;
+    grid-template-columns:repeat(2,minmax(0,1fr))!important;
+    gap:8px!important;
+  }
+  .analysisPeriodControls .intelligenceRange button{
+    width:100%!important;min-width:0!important;margin:0!important;
+  }
+  .analysisSingleDate,.analysisCustomRange{grid-template-columns:1fr!important}
+  .analysisSingleDate input,.analysisSingleDate button,
+  .analysisCustomRange input,.analysisCustomRange button{width:100%!important;max-width:100%!important}
+  .analysisMainKpis,.analysisComparisonCards{grid-template-columns:repeat(2,minmax(0,1fr))!important}
+  .analysisShiftGrid,.analysisOpportunities{grid-template-columns:1fr!important}
+  .analysisMetricCard,.analysisShiftCard{width:100%!important}
+  .analysisCompareTable p{grid-template-columns:1fr!important;gap:4px!important}
+  .analysisCompareTable .changePill{grid-column:auto!important;grid-row:auto!important;justify-self:start!important}
+  .analysisStaffList button{grid-template-columns:1fr!important}
+  .analysisStaffList strong{justify-self:start!important}
+
+  /* Rankings y productos: tarjetas en móvil; tablas antiguas, scroll interno. */
+  .inventoryRankingFilters{grid-template-columns:1fr!important}
+  .inventoryRankingFilters>*{grid-column:auto!important;width:100%!important}
+  .rankingSort{grid-template-columns:1fr!important}
+  .rankingSort button,.rankingSort button:last-child{grid-column:auto!important;width:100%!important}
+  .inventoryRankingList article,.inventoryQuickCostList article{width:100%!important;max-width:100%!important}
+  .inventoryProductDetailGrid{grid-template-columns:1fr!important}
+
+  /* Operación / Servicio. El plano mantiene su proporción sin forzar viewport. */
+  .serviceLayout{grid-template-columns:1fr!important;max-width:100%!important}
+  .serviceZone,.servicePanel{max-width:100%!important;min-width:0!important}
+  .floorGrid{width:100%!important;max-width:100%!important;overflow:hidden!important}
+  .serviceKpis{grid-template-columns:repeat(2,minmax(0,1fr))!important}
+
+  /* Personal, Finanzas, Gestoría, Configuración. */
+  .staffKpis,.clockKpis,.unifiedProfitKpis{grid-template-columns:repeat(2,minmax(0,1fr))!important}
+  .employeeCards,.staffGrid,.settingsSummaryGrid,.settingsMainGrid,
+  .unifiedProfitForms{grid-template-columns:1fr!important}
+  .gestoria6 .row.controls,.inventory7 .row.controls,.unifiedProfit .controls{
+    display:grid!important;grid-template-columns:1fr!important;width:100%!important;
+  }
+  .gestoria6 .row.controls>*,.inventory7 .row.controls>*,.unifiedProfit .controls>*{
+    width:100%!important;max-width:100%!important;margin:0!important;
+  }
+
+  /* Formularios y botones: nunca provocan scroll lateral. */
+  .erp50 input,.erp50 select,.erp50 textarea,.erp50 button{
+    max-width:100%;
+  }
+}
+
+@media (max-width: 390px){
+  .dash5Kpis,.analysisMainKpis,.analysisComparisonCards,.inventoryKpis,
+  .unifiedProfitKpis,.staffKpis,.clockKpis,.serviceKpis{
+    grid-template-columns:1fr!important;
+  }
+  .erp50 .areaTabs{grid-template-columns:1fr!important}
+}
