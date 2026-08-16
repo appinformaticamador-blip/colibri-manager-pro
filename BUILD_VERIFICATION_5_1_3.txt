@@ -1,0 +1,14 @@
+COLIBRÍ ERP 5.1.3 · VERIFICACIÓN
+
+- package.json: JSON válido
+- package-lock.json: JSON válido
+- imports locales activos en src/: 0 faltantes
+- styles.css: llaves CSS equilibradas (2883/2883)
+- npm ci --no-audit --no-fund: intentado; no completó dentro del entorno disponible.
+- npm run build: no se declara como superado porque npm ci no completó la instalación.
+
+Cambio principal 5.1.3:
+- Cuadrante mantiene tabla completa en PC.
+- En móvil, el cuadrante se transforma por CSS en tarjetas verticales por franja/día, eliminando el min-width de escritorio.
+- Botonera semanal, copia de días, empleados, modales y resúmenes adaptados a móvil.
+- Blindaje global adicional contra overflow lateral en todas las áreas ERP.
