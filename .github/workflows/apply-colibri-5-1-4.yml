@@ -49,3 +49,5 @@ jobs:
           git add -A
           git commit -m "COLIBRÍ ERP 5.1.4 · Conciliación por fecha y hora"
           git push origin HEAD:upload-5-1-4-temp
+
+# retry trigger 2026-08-22
