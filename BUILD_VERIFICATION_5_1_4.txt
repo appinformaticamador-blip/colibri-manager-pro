@@ -1,0 +1,7 @@
+COLIBRI ERP 5.1.4
+- Nueva ventana temporal de conciliación SumUp/Numier: fecha y hora de inicio; fin opcional.
+- El mismo corte se aplica a cobros SumUp y tickets Numier.
+- Filtro Bar Colibri mantenido.
+- Recalculo del periodo sin volver a subir el archivo.
+- Integración GitHub reproducible mediante scripts/apply-colibri-5-1-4.mjs.
+- La validación final de build se comprueba en Vercel tras integrar en develop.
