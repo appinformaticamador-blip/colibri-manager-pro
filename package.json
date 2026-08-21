@@ -1,15 +1,15 @@
 {
   "name": "colibri-manager-pro",
   "private": true,
-  "version": "5.1.3",
+  "version": "5.1.4",
   "type": "module",
   "engines": {
     "node": "22.x",
     "npm": ">=10.0.0"
   },
   "scripts": {
-    "dev": "vite --host 0.0.0.0",
-    "build": "vite build",
+    "dev": "node scripts/apply-colibri-5-1-4.mjs && vite --host 0.0.0.0",
+    "build": "node scripts/apply-colibri-5-1-4.mjs && vite build",
     "preview": "vite preview --host 0.0.0.0",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
