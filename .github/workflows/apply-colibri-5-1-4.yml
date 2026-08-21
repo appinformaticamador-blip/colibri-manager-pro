@@ -1,0 +1,51 @@
+name: Apply COLIBRI ERP 5.1.4
+
+on:
+  push:
+    branches:
+      - upload-5-1-4-temp
+    paths:
+      - '.github/workflows/apply-colibri-5-1-4.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: upload-5-1-4-temp
+          fetch-depth: 0
+
+      - name: Rebuild patch
+        shell: bash
+        run: |
+          cat .github/patches/colibri-5.1.4.part*.b64 | base64 -d > /tmp/colibri-5.1.4.patch
+          git apply --check /tmp/colibri-5.1.4.patch
+          git apply /tmp/colibri-5.1.4.patch
+
+      - name: Verify version and feature
+        shell: bash
+        run: |
+          node -e "const p=require('./package.json'); if(p.version!=='5.1.4') process.exit(1)"
+          grep -q "paymentTimeWindow" src/App.jsx
+          grep -q "paymentTimeFields" src/styles.css
+
+      - name: Install and build
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+
+      - name: Commit clean 5.1.4 source
+        shell: bash
+        run: |
+          rm -f .github/patches/colibri-5.1.4.part*.b64
+          rm -f .github/workflows/apply-colibri-5-1-4.yml
+          git config user.name "appinformaticamador-blip"
+          git config user.email "appinformaticamador@gmail.com"
+          git add -A
+          git commit -m "COLIBRÍ ERP 5.1.4 · Conciliación por fecha y hora"
+          git push origin HEAD:upload-5-1-4-temp
