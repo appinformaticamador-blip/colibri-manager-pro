@@ -8,8 +8,8 @@
     "npm": ">=10.0.0"
   },
   "scripts": {
-    "dev": "node scripts/apply-colibri-5-1-4.mjs && vite --host 0.0.0.0",
-    "build": "node scripts/apply-colibri-5-1-4.mjs && vite build",
+    "dev": "vite --host 0.0.0.0",
+    "build": "vite build",
     "preview": "vite preview --host 0.0.0.0",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
