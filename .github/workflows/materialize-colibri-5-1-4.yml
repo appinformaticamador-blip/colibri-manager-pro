@@ -20,9 +20,12 @@ jobs:
           ref: fix-materialize-5-1-4
           fetch-depth: 0
 
-      - name: Materialize 5.1.4 source
+      - name: Materialize 5.1.4 source with native git apply
+        shell: bash
         run: |
-          node scripts/apply-colibri-5-1-4.mjs
+          cat .github/patches/colibri-5.1.4.part*.b64 | base64 -d > /tmp/colibri-5.1.4.patch
+          git apply --check --whitespace=nowarn --include=src/App.jsx --include=src/styles.css /tmp/colibri-5.1.4.patch
+          git apply --whitespace=nowarn --include=src/App.jsx --include=src/styles.css /tmp/colibri-5.1.4.patch
           node <<'NODE'
           const fs=require('fs');
           const p=JSON.parse(fs.readFileSync('package.json','utf8'));
