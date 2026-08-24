@@ -1,0 +1,59 @@
+name: Materialize COLIBRI ERP 5.1.4
+
+on:
+  push:
+    branches:
+      - fix-materialize-5-1-4
+    paths:
+      - '.github/workflows/materialize-colibri-5-1-4.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  materialize-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: fix-materialize-5-1-4
+          fetch-depth: 0
+
+      - name: Materialize 5.1.4 source
+        run: |
+          node scripts/apply-colibri-5-1-4.mjs
+          node <<'NODE'
+          const fs=require('fs');
+          const p=JSON.parse(fs.readFileSync('package.json','utf8'));
+          p.version='5.1.4';
+          p.scripts.dev='vite --host 0.0.0.0';
+          p.scripts.build='vite build';
+          fs.writeFileSync('package.json',JSON.stringify(p,null,2)+'\n');
+          const l=JSON.parse(fs.readFileSync('package-lock.json','utf8'));
+          l.version='5.1.4';
+          if(l.packages&&l.packages['']) l.packages[''].version='5.1.4';
+          fs.writeFileSync('package-lock.json',JSON.stringify(l,null,2)+'\n');
+          NODE
+          rm -f scripts/apply-colibri-5-1-4.mjs
+          rm -f .github/patches/colibri-5.1.4.part*.b64
+
+      - name: Verify selector is in real source
+        run: |
+          grep -q "paymentTimeWindow" src/App.jsx
+          grep -q "Desde · hora" src/App.jsx
+          grep -q "paymentTimeFields" src/styles.css
+
+      - name: Install and build
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+
+      - name: Commit materialized source
+        run: |
+          rm -f .github/workflows/materialize-colibri-5-1-4.yml
+          git config user.name "appinformaticamador-blip"
+          git config user.email "appinformaticamador@gmail.com"
+          git add -A
+          git commit -m "COLIBRÍ ERP 5.1.4 · materializar conciliación por fecha y hora"
+          git push origin HEAD:fix-materialize-5-1-4
