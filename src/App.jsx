@@ -817,6 +817,30 @@ function SmartStaffPlanner({weekId,weekData,onApply}){
  </div>
 }
 
+function WeeklyStaffPerformance({weekId}){
+ const[state,setState]=useState({loading:true,error:'',from:'',to:'',label:'',sales:0,tickets:0,productCost:0,laborCost:0,hours:0,fixed:0,variableERP:0,numierG:0,realProfit:0,realMargin:0,labor:[]});
+ const[detail,setDetail]=useState(null);
+ useEffect(()=>{load()},[weekId]);
+ async function load(){
+  if(!supabase){setState(s=>({...s,loading:false,error:'Supabase no configurado'}));return}
+  setState(s=>({...s,loading:true,error:''}));
+  try{
+   const monday=isoWeekMonday(weekId),from=localISODate(monday),weekTo=addDays(from,7),current=today();
+   const to=(from<=current&&current<weekTo)?addDays(current,1):weekTo;
+   const [sales,costMap,real]=await Promise.all([loadSalesRangeGestoria(from,to),loadProfitabilityCostMap(),loadRealProfitability(supabase,from,to,[])]);
+   const tickets=(sales.tickets||[]).filter(isRealSaleTicket),lines=normalizePeriodLines(tickets,sales.lines||[]),summary=summarizeTickets(tickets),products=periodFinancials(lines,costMap);
+   const numierG=Number(sales.numierExpenses?.total||0),variableERP=Number(real.variable||0),variable=variableERP+numierG;
+   const core=calculateProfitability({revenue:summary.total,productCost:products.cost,laborCost:Number(real.laborAccrued||0),fixedExpenses:Number(real.fixed||0),variableExpenses:variable});
+   setState({loading:false,error:'',from,to:addDays(to,-1),label:to===weekTo?'semana completa':'semana hasta hoy',sales:summary.total,tickets:summary.tickets,productCost:products.cost,laborCost:Number(real.laborAccrued||0),hours:Number(real.hours||0),fixed:Number(real.fixed||0),variableERP,numierG,realProfit:core.realProfit,realMargin:core.realMarginPct,labor:real.details?.labor||[]});
+  }catch(e){setState(s=>({...s,loading:false,error:e.message||String(e)}))}
+ }
+ const employeeCount=state.labor.filter(x=>Number(x.hours||0)>0).length,profitPerHour=state.hours?state.realProfit/state.hours:0,profitPerEmployee=employeeCount?state.realProfit/employeeCount:0,laborPct=state.sales?state.laborCost/state.sales*100:0,salesPerHour=state.hours?state.sales/state.hours:0;
+ const open=(kind,title)=>setDetail({kind,title});
+ const cards=[['sales','Ventas',money(state.sales),`${state.tickets} tickets`],['labor','Coste personal',money(state.laborCost),`${state.hours.toFixed(1)} h de cuadrante`],['profit','Beneficio real',money(state.realProfit),`${state.realMargin.toFixed(1)}% de margen`],['hour','Beneficio / h cuadrante',money(profitPerHour),`${money(salesPerHour)} ventas/h`],['employee','Beneficio / empleado',money(profitPerEmployee),`${employeeCount} empleados programados`],['ratio','Personal / ventas',`${laborPct.toFixed(1)}%`,`${money(state.laborCost)} sobre ${money(state.sales)}`]];
+ const detailRows=detail?.kind==='labor'||detail?.kind==='employee'?state.labor.map(x=>[x.employee_name||'Empleado',`${Number(x.hours||0).toFixed(1)} h × ${money(x.hourly_cost)} = ${money(x.cost)}`]):detail?.kind==='profit'?[['Ventas',money(state.sales)],['Coste productos',`− ${money(state.productCost)}`],['Personal (cuadrante)',`− ${money(state.laborCost)}`],['Gastos fijos',`− ${money(state.fixed)}`],['Gastos variables ERP',`− ${money(state.variableERP)}`],['Gastos Numier G',`− ${money(state.numierG)}`],['Beneficio real',money(state.realProfit)]]:detail?.kind==='sales'?[['Ventas',money(state.sales)],['Tickets',state.tickets],['Periodo',`${state.from} → ${state.to}`]]:detail?.kind==='hour'?[['Horas de cuadrante',state.hours.toFixed(1)],['Ventas / hora',money(salesPerHour)],['Beneficio / hora',money(profitPerHour)]]:detail?.kind==='ratio'?[['Coste de personal',money(state.laborCost)],['Ventas',money(state.sales)],['Personal / ventas',`${laborPct.toFixed(1)}%`]]:[['Beneficio real',money(state.realProfit)],['Empleados programados',employeeCount],['Beneficio / empleado',money(profitPerEmployee)]];
+ return <section className="card weeklyStaffPerformance"><div className="row between weeklyPerfHead"><div><span className="sectionEyebrow">RENDIMIENTO SEMANAL · BENEFICIO REAL / PERSONAL</span><h2>Rendimiento de {weekId}</h2><p>{state.from&&`${fmtDate(state.from)} a ${fmtDate(state.to)} · ${state.label}.`} El coste de personal procede exclusivamente del cuadrante; los fichajes no intervienen en el cálculo económico.</p></div><button onClick={load} disabled={state.loading}>{state.loading?'Calculando…':'Actualizar'}</button></div>{state.error&&<div className="warnBox">{state.error}</div>}<div className="weeklyPerfKpis">{cards.map(([kind,title,value,sub])=><button type="button" className="weeklyPerfKpi" key={kind} onClick={()=>open(kind,title)}><span>{title}</span><b className={kind==='profit'?(state.realProfit>=0?'ok':'bad'):''}>{value}</b><small>{sub} · ver detalle ›</small></button>)}</div><div className="weeklyEmployeeList"><div className="row between"><div><h3>Coste por empleado según cuadrante</h3><p className="mutedText">Pulsa cualquier empleado para ver su imputación semanal.</p></div></div>{state.labor.length?state.labor.map((x,i)=><button key={x.employee_id||x.employee_name||i} className="weeklyEmployeeRow" onClick={()=>setDetail({kind:'laborOne',title:x.employee_name||'Empleado',employee:x})}><span><b>{x.employee_name||'Empleado'}</b><small>{Number(x.hours||0).toFixed(1)} h programadas</small></span><strong>{money(x.cost)}</strong></button>):!state.loading&&<div className="alertOk">No hay horas de cuadrante imputadas en este periodo.</div>}</div>{detail&&<div className="modal weeklyPerfOverlay" onClick={()=>setDetail(null)}><div className="card weeklyPerfModal" onClick={e=>e.stopPropagation()}><div className="row between"><div><span className="sectionEyebrow">DETALLE SEMANAL</span><h2>{detail.title}</h2></div><button className="red" onClick={()=>setDetail(null)}>Cerrar</button></div>{detail.kind==='laborOne'?<div className="weeklyPerfDetail"><p><span>Horas de cuadrante</span><b>{Number(detail.employee.hours||0).toFixed(1)} h</b></p><p><span>Coste / hora</span><b>{money(detail.employee.hourly_cost)}</b></p><p><span>Coste semanal</span><b>{money(detail.employee.cost)}</b></p><p><span>% del coste personal</span><b>{state.laborCost?`${(Number(detail.employee.cost||0)/state.laborCost*100).toFixed(1)}%`:'0.0%'}</b></p></div>:<div className="weeklyPerfDetail">{detailRows.map((r,i)=><p key={i}><span>{r[0]}</span><b>{r[1]}</b></p>)}</div>}</div></div>}</section>
+}
+
 function Schedule(){
  const RESTAURANT_ID='colibri';
  const STORAGE='colibriCuadrantesRC332_CACHE';
@@ -1041,7 +1065,7 @@ function Schedule(){
    <div className="copyDayBox"><select value={sourceDay} onChange={e=>setSourceDay(e.target.value)}>{DAYS.map(d=><option key={d}>{d}</option>)}</select><span>→</span><select value={targetDay} onChange={e=>setTargetDay(e.target.value)}>{DAYS.map(d=><option key={d}>{d}</option>)}</select><button onClick={copyDay}>Copiar día</button></div>
    <div className="quickCopyDays"><b>Copias rápidas:</b>{DAYS.slice(0,-1).map((d,i)=><button key={d} onClick={()=>quickCopy(d,DAYS[i+1])}>{d} → {DAYS[i+1]}</button>)}</div>
   </div>
-  <SmartStaffPlanner weekId={weekId} weekData={weekData} onApply={applySmartProposal}/>
+  <WeeklyStaffPerformance weekId={weekId}/>
   <div className="card mainScheduleCard scheduleCard" id="printSchedule">
    <div className="row between scheduleTitleBar"><div><h2>Cuadrante semanal {weekId}</h2><p className="mutedText">Fuente única: Supabase. En PC arrastra una etiqueta para DUPLICARLA en otra franja. En móvil toca un empleado y luego toca la celda destino.</p></div><b className="scheduleVersion">{totalHours.toFixed(1)} h</b></div>
    {warnings.length>0&&<div className="warnBox">{warnings.join(' · ')}</div>}
