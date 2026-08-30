@@ -2,8 +2,10 @@ name: Apply COLIBRI ERP 5.1.5
 
 on:
   push:
-    branches: [feature-cuadrante-rendimiento-5-1-5]
-    paths: ['.github/workflows/apply-colibri-5-1-5.yml']
+    branches:
+      - feature-cuadrante-rendimiento-5-1-5
+    paths:
+      - '.github/workflows/apply-colibri-5-1-5.yml'
 
 permissions:
   contents: write
@@ -12,80 +14,13 @@ jobs:
   apply-build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
           ref: feature-cuadrante-rendimiento-5-1-5
           fetch-depth: 0
-      - name: Apply source changes
-        shell: bash
-        run: |
-          python3 <<'PY'
-          from pathlib import Path
-          import json
-          app_path=Path('src/App.jsx'); css_path=Path('src/styles.css')
-          app=app_path.read_text()
-          old='  <SmartStaffPlanner weekId={weekId} weekData={weekData} onApply={applySmartProposal}/>'
-          new='  <WeeklyStaffPerformance weekId={weekId}/>'
-          if old not in app and new not in app: raise SystemExit('SmartStaffPlanner invocation not found')
-          app=app.replace(old,new,1)
-          marker='function Schedule(){'
-          component=r'''function WeeklyStaffPerformance({weekId}){
- const[state,setState]=useState({loading:true,error:'',from:'',to:'',label:'',sales:0,tickets:0,productCost:0,laborCost:0,hours:0,fixed:0,variableERP:0,numierG:0,realProfit:0,realMargin:0,labor:[]});
- const[detail,setDetail]=useState(null);
- useEffect(()=>{load()},[weekId]);
- async function load(){
-  if(!supabase){setState(s=>({...s,loading:false,error:'Supabase no configurado'}));return}
-  setState(s=>({...s,loading:true,error:''}));
-  try{
-   const monday=isoWeekMonday(weekId),from=localISODate(monday),weekTo=addDays(from,7),current=today();
-   const to=(from<=current&&current<weekTo)?addDays(current,1):weekTo;
-   const [sales,costMap,real]=await Promise.all([loadSalesRangeGestoria(from,to),loadProfitabilityCostMap(),loadRealProfitability(supabase,from,to,[])]);
-   const tickets=(sales.tickets||[]).filter(isRealSaleTicket),lines=normalizePeriodLines(tickets,sales.lines||[]),summary=summarizeTickets(tickets),products=periodFinancials(lines,costMap);
-   const numierG=Number(sales.numierExpenses?.total||0),variableERP=Number(real.variable||0),variable=variableERP+numierG;
-   const core=calculateProfitability({revenue:summary.total,productCost:products.cost,laborCost:Number(real.laborAccrued||0),fixedExpenses:Number(real.fixed||0),variableExpenses:variable});
-   setState({loading:false,error:'',from,to:addDays(to,-1),label:to===weekTo?'semana completa':'semana hasta hoy',sales:summary.total,tickets:summary.tickets,productCost:products.cost,laborCost:Number(real.laborAccrued||0),hours:Number(real.hours||0),fixed:Number(real.fixed||0),variableERP,numierG,realProfit:core.realProfit,realMargin:core.realMarginPct,labor:real.details?.labor||[]});
-  }catch(e){setState(s=>({...s,loading:false,error:e.message||String(e)}))}
- }
- const employeeCount=state.labor.filter(x=>Number(x.hours||0)>0).length,profitPerHour=state.hours?state.realProfit/state.hours:0,profitPerEmployee=employeeCount?state.realProfit/employeeCount:0,laborPct=state.sales?state.laborCost/state.sales*100:0,salesPerHour=state.hours?state.sales/state.hours:0;
- const open=(kind,title)=>setDetail({kind,title});
- const cards=[
-  ['sales','Ventas',money(state.sales),`${state.tickets} tickets`],
-  ['labor','Coste personal',money(state.laborCost),`${state.hours.toFixed(1)} h de cuadrante`],
-  ['profit','Beneficio real',money(state.realProfit),`${state.realMargin.toFixed(1)}% de margen`],
-  ['hour','Beneficio / h cuadrante',money(profitPerHour),`${money(salesPerHour)} ventas/h`],
-  ['employee','Beneficio / empleado',money(profitPerEmployee),`${employeeCount} empleados programados`],
-  ['ratio','Personal / ventas',`${laborPct.toFixed(1)}%`,`${money(state.laborCost)} sobre ${money(state.sales)}`]
- ];
- const detailRows=detail?.kind==='labor'||detail?.kind==='employee'?state.labor.map(x=>[x.employee_name||'Empleado',`${Number(x.hours||0).toFixed(1)} h × ${money(x.hourly_cost)} = ${money(x.cost)}`]):detail?.kind==='profit'?[['Ventas',money(state.sales)],['Coste productos',`− ${money(state.productCost)}`],['Personal (cuadrante)',`− ${money(state.laborCost)}`],['Gastos fijos',`− ${money(state.fixed)}`],['Gastos variables ERP',`− ${money(state.variableERP)}`],['Gastos Numier G',`− ${money(state.numierG)}`],['Beneficio real',money(state.realProfit)]]:detail?.kind==='sales'?[['Ventas',money(state.sales)],['Tickets',state.tickets],['Periodo',`${state.from} → ${state.to}`]]:detail?.kind==='hour'?[['Horas de cuadrante',state.hours.toFixed(1)],['Ventas / hora',money(salesPerHour)],['Beneficio / hora',money(profitPerHour)]]:detail?.kind==='ratio'?[['Coste de personal',money(state.laborCost)],['Ventas',money(state.sales)],['Personal / ventas',`${laborPct.toFixed(1)}%`]]:[['Beneficio real',money(state.realProfit)],['Empleados programados',employeeCount],['Beneficio / empleado',money(profitPerEmployee)]];
- return <section className="card weeklyStaffPerformance"><div className="row between weeklyPerfHead"><div><span className="sectionEyebrow">RENDIMIENTO SEMANAL · BENEFICIO REAL / PERSONAL</span><h2>Rendimiento de {weekId}</h2><p>{state.from&&`${fmtDate(state.from)} a ${fmtDate(state.to)} · ${state.label}.`} El coste de personal procede exclusivamente del cuadrante; los fichajes no intervienen en el cálculo económico.</p></div><button onClick={load} disabled={state.loading}>{state.loading?'Calculando…':'Actualizar'}</button></div>{state.error&&<div className="warnBox">{state.error}</div>}<div className="weeklyPerfKpis">{cards.map(([kind,title,value,sub])=><button type="button" className="weeklyPerfKpi" key={kind} onClick={()=>open(kind,title)}><span>{title}</span><b className={kind==='profit'?(state.realProfit>=0?'ok':'bad'):''}>{value}</b><small>{sub} · ver detalle ›</small></button>)}</div><div className="weeklyEmployeeList"><div className="row between"><div><h3>Coste por empleado según cuadrante</h3><p className="mutedText">Pulsa cualquier empleado para ver su imputación semanal.</p></div></div>{state.labor.length?state.labor.map((x,i)=><button key={x.employee_id||x.employee_name||i} className="weeklyEmployeeRow" onClick={()=>setDetail({kind:'laborOne',title:x.employee_name||'Empleado',employee:x})}><span><b>{x.employee_name||'Empleado'}</b><small>{Number(x.hours||0).toFixed(1)} h programadas</small></span><strong>{money(x.cost)}</strong></button>):!state.loading&&<div className="alertOk">No hay horas de cuadrante imputadas en este periodo.</div>}</div>{detail&&<div className="modal weeklyPerfOverlay" onClick={()=>setDetail(null)}><div className="card weeklyPerfModal" onClick={e=>e.stopPropagation()}><div className="row between"><div><span className="sectionEyebrow">DETALLE SEMANAL</span><h2>{detail.title}</h2></div><button className="red" onClick={()=>setDetail(null)}>Cerrar</button></div>{detail.kind==='laborOne'?<div className="weeklyPerfDetail"><p><span>Horas de cuadrante</span><b>{Number(detail.employee.hours||0).toFixed(1)} h</b></p><p><span>Coste / hora</span><b>{money(detail.employee.hourly_cost)}</b></p><p><span>Coste semanal</span><b>{money(detail.employee.cost)}</b></p><p><span>% del coste personal</span><b>{state.laborCost?`${(Number(detail.employee.cost||0)/state.laborCost*100).toFixed(1)}%`:'0.0%'}</b></p></div>:<div className="weeklyPerfDetail">{detailRows.map((r,i)=><p key={i}><span>{r[0]}</span><b>{r[1]}</b></p>)}</div>}</div></div>}</section>
-}
-
-'''
-          if 'function WeeklyStaffPerformance(' not in app:
-              if marker not in app: raise SystemExit('Schedule marker not found')
-              app=app.replace(marker,component+marker,1)
-          app_path.write_text(app)
-          css=css_path.read_text()
-          css_add=r'''
-
-/* COLIBRI ERP 5.1.5 · cuadrante semanal horizontal móvil + rendimiento semanal */
-.weeklyStaffPerformance{overflow:hidden}.weeklyPerfHead h2{margin:.25rem 0;color:#28246f}.weeklyPerfHead p{max-width:900px;color:#5d6b7e}.weeklyPerfKpis{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:16px 0}.weeklyPerfKpi{background:#f7fbfa!important;color:#26384c!important;border:1px solid #d9e7e8!important;border-radius:18px!important;padding:16px!important;text-align:left!important;min-height:118px!important}.weeklyPerfKpi span,.weeklyPerfKpi small{display:block;color:#5d6b7e}.weeklyPerfKpi b{display:block;color:#078878;font-size:1.65rem;margin:8px 0}.weeklyPerfKpi:hover{outline:2px solid #2eb89e}.weeklyEmployeeList{border-top:1px solid #e1ecec;padding-top:10px}.weeklyEmployeeRow{width:100%;display:flex;justify-content:space-between;align-items:center;gap:12px;background:#fff!important;color:#26384c!important;border:1px solid #dce8e8!important;margin:8px 0;padding:12px 14px!important;text-align:left!important}.weeklyEmployeeRow span{display:grid;gap:3px}.weeklyEmployeeRow small{color:#65788a}.weeklyEmployeeRow strong{color:#078878;font-size:1.05rem}.weeklyPerfModal{width:min(720px,calc(100vw - 28px));max-height:86dvh;overflow:auto}.weeklyPerfDetail{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.weeklyPerfDetail p{margin:0;background:#f5faf9;border:1px solid #deebea;border-radius:14px;padding:13px}.weeklyPerfDetail span,.weeklyPerfDetail b{display:block}.weeklyPerfDetail span{color:#65788a;font-weight:800}.weeklyPerfDetail b{margin-top:6px;color:#26384c}
-@media(max-width:700px){
- .weeklyPerfKpis{grid-template-columns:1fr 1fr}.weeklyPerfHead{display:block}.weeklyPerfHead button{width:100%;margin-top:8px}.weeklyPerfDetail{grid-template-columns:1fr}
- /* La semana completa se conserva igual que en PC; solo el contenedor hace scroll lateral. */
- .scheduleFresh .scheduleWrap{display:block!important;width:100%!important;max-width:100%!important;overflow-x:auto!important;overflow-y:hidden!important;-webkit-overflow-scrolling:touch!important;border:1px solid #dcefeb!important;border-radius:18px!important;padding-bottom:8px!important}
- .scheduleFresh .schedulePro{display:table!important;min-width:1000px!important;width:1000px!important;max-width:none!important;table-layout:fixed!important;border-collapse:separate!important;border-spacing:6px!important;overflow:visible!important}
- .scheduleFresh .schedulePro thead{display:table-header-group!important}.scheduleFresh .schedulePro tbody{display:table-row-group!important;width:auto!important}.scheduleFresh .schedulePro tr{display:table-row!important;width:auto!important;padding:0!important;border:0!important;background:transparent!important;box-shadow:none!important}.scheduleFresh .schedulePro th,.scheduleFresh .schedulePro td{display:table-cell!important;width:auto!important;max-width:none!important;box-sizing:border-box!important}.scheduleFresh .schedulePro th{min-width:125px!important}.scheduleFresh .schedulePro .slotHour{min-width:118px!important;width:118px!important;height:auto!important;padding:10px!important;text-align:left!important}.scheduleFresh .schedulePro .shiftCell{position:relative!important;min-width:125px!important;width:125px!important;height:88px!important;min-height:88px!important;padding:8px!important;overflow:visible!important}.scheduleFresh .schedulePro .shiftCell::before{display:none!important;content:none!important}.scheduleFresh .schedulePro .badge{display:block!important;width:auto!important;max-width:100%!important;white-space:normal!important;margin:3px 0!important}.scheduleFresh .schedulePro .emptyShift{padding-top:18px!important;text-align:center!important}
-}
-@media(max-width:430px){.weeklyPerfKpis{grid-template-columns:1fr}.weeklyStaffPerformance{padding:14px!important}}
-'''
-          if 'COLIBRI ERP 5.1.5 · cuadrante semanal horizontal móvil' not in css: css += css_add
-          css_path.write_text(css)
-          for name in ('package.json','package-lock.json'):
-              p=Path(name); data=json.loads(p.read_text()); data['version']='5.1.5'
-              if name=='package-lock.json' and data.get('packages',{}).get('') is not None: data['packages']['']['version']='5.1.5'
-              p.write_text(json.dumps(data,ensure_ascii=False,indent=2)+'\n')
-          PY
+      - name: Apply 5.1.5
+        run: python3 scripts/apply-colibri-5-1-5.py
       - name: Verify source
         run: |
           grep -q 'function WeeklyStaffPerformance' src/App.jsx
@@ -99,6 +34,7 @@ jobs:
       - name: Commit verified 5.1.5
         run: |
           rm -f .github/workflows/apply-colibri-5-1-5.yml
+          rm -f scripts/apply-colibri-5-1-5.py
           git config user.name 'appinformaticamador-blip'
           git config user.email 'appinformaticamador@gmail.com'
           git add -A
