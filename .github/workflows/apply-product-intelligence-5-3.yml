@@ -1,0 +1,44 @@
+name: Apply COLIBRI ERP 5.3 Product Intelligence
+
+on:
+  push:
+    branches: [feature-inteligencia-producto-5-3-0]
+    paths:
+      - '.github/workflows/apply-product-intelligence-5-3.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature-inteligencia-producto-5-3-0
+          fetch-depth: 0
+      - name: Apply product intelligence 5.3
+        run: python3 scripts/apply_product_intelligence_5_3.py
+      - name: Verify source rules
+        run: |
+          grep -q 'function ProductIntelligence' src/App.jsx
+          grep -q 'SIMULADOR DE DECISIONES' src/App.jsx
+          grep -q 'Productos comprados junto' src/App.jsx
+          grep -q 'Inteligencia de Producto' src/styles.css
+          grep -q '"version": "5.3.0"' package.json
+          grep -q 'ProductIntelligence tickets={bi.tickets}' src/App.jsx
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Build
+        run: npm run build
+      - name: Commit verified source
+        run: |
+          git config user.name 'appinformaticamador-blip'
+          git config user.email 'appinformaticamador@gmail.com'
+          git add src/App.jsx src/styles.css package.json package-lock.json
+          if git diff --cached --quiet; then
+            echo 'No source changes to commit'
+          else
+            git commit -m 'COLIBRÍ ERP 5.3.0 · inteligencia de producto y simulador'
+            git push origin HEAD:feature-inteligencia-producto-5-3-0
+          fi
